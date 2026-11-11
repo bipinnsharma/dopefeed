@@ -528,6 +528,21 @@ async fn submit_blocks_redirect_to_private() {
 }
 
 #[test]
+fn youtube_channel_id_is_extracted() {
+    let html =
+        r#"{"channelId":"UCaaaaaaaaaaaaaaaaaaaaaa","externalId":"UCbbbbbbbbbbbbbbbbbbbbbb"}"#;
+    assert_eq!(
+        crate::worker::discover::extract_channel_id(html).as_deref(),
+        Some("UCaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    let html = r#"<link href="https://www.youtube.com/channel/UCcccccccccccccccccccccc">"#;
+    assert_eq!(
+        crate::worker::discover::extract_channel_id(html).as_deref(),
+        Some("UCcccccccccccccccccccccc")
+    );
+}
+
+#[test]
 fn youtube_guid_extracts_embed_id() {
     let post = Post {
         id: 1,
@@ -543,4 +558,17 @@ fn youtube_guid_extracts_embed_id() {
         published_label: "Jan 01, 2025".into(),
     };
     assert_eq!(post.youtube_id(), Some("dQw4w9WgXcQ"));
+}
+
+#[test]
+fn feed_parser_drops_empty_text_elements() {
+    let xml = br#"<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+<title>t</title><id>f</id><updated>2024-01-01T00:00:00Z</updated>
+<entry><id>e</id><title>e</title><updated>2024-01-01T00:00:00Z</updated>
+<media:group><media:description></media:description></media:group></entry>
+</feed>"#;
+    assert!(feed_rs::parser::parse(xml.as_slice()).is_err());
+    let feed = crate::worker::discover::parse_feed(xml).unwrap();
+    assert_eq!(feed.entries.len(), 1);
 }
