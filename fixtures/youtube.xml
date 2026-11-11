@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+  <title>YouTube Fixture</title>
+  <link href="https://www.youtube.com/channel/UCtestchannel" rel="alternate"/>
+  <id>yt:channel:UCtestchannel</id>
+  <entry>
+    <id>yt:video:dQw4w9WgXcQ</id>
+    <title>Video one</title>
+    <link href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"/>
+    <published>2025-03-01T10:00:00+00:00</published>
+    <updated>2025-03-01T10:00:00+00:00</updated>
+    <summary>A video entry.</summary>
+  </entry>
+</feed>

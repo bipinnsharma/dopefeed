@@ -1,0 +1,11 @@
+<div class="post-list">
+{% for post in posts %}{% include "_post_row.html" %}{% endfor %}
+</div>
+{% if posts.is_empty() %}<div class="empty">No posts yet. New posts appear here after the next fetch.</div>{% endif %}
+{% if has_more %}
+<div id="timeline-more" class="load-more">
+  <button type="button" class="button-secondary"
+          hx-get="/api/timeline?feeds={{ feeds|urlencode }}&page={{ page + 1 }}"
+          hx-target="#timeline-more" hx-swap="outerHTML">Load more</button>
+</div>
+{% endif %}

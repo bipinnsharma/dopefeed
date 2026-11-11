@@ -1,0 +1,67 @@
+/* dopefeed design tokens — extracted from https://recent.design (light only).
+   Hex = sRGB fallback; oklch = source of truth (wins in modern browsers). */
+:root {
+  --color-surface:#ffffff; --color-surface:oklch(100% 0 0);
+  --color-surface-subtle:#f5f5f5; --color-surface-subtle:oklch(97% 0 0);
+  --color-surface-muted:#f0f0f0; --color-surface-muted:oklch(95.5% 0 0);
+  --color-border:#ebebeb; --color-border:oklch(94% 0 0);
+  --color-ink:#0b0b0b; --color-ink:oklch(15% 0 0);
+  --color-ink-secondary:#0000007c; --color-ink-secondary:oklch(0% 0 0/.486);
+  --color-ink-tertiary:#00000044; --color-ink-tertiary:oklch(0% 0 0/.267);
+  --color-ink-inverse:#fdfdfd; --color-ink-inverse:oklch(99.5% 0 0);
+  --color-fill-hover:#00000010; --color-fill-hover:oklch(0% 0 0/.063);
+  --color-fill-active:#00000017; --color-fill-active:oklch(0% 0 0/.09);
+  --color-fill-strong:#0000001f; --color-fill-strong:oklch(0% 0 0/.122);
+  --color-overlay:#0b0b0b66; --color-overlay:oklch(15% 0 0/.4);
+  --color-accent:#ff4000; --color-accent:oklch(68% .27 48);
+  --color-accent-strong:#f62b00; --color-accent-strong:oklch(62% .26 48);
+  --color-highlight:#f900a3; --color-highlight:oklch(64% .28 350);
+  --color-highlight-strong:#e00090; --color-highlight-strong:oklch(58% .269 350);
+  --color-focus:#2287ff; --color-focus:oklch(66% .246 260);
+  --color-success:#00c500; --color-success:oklch(70% .27 145);
+  --color-success-ink:#003700; --color-success-ink:oklch(28% .13 145);
+  --color-warning:#fccc00; --color-warning:oklch(86% .21 95);
+  --color-warning-ink:#573f00; --color-warning-ink:oklch(38% .12 95);
+  --color-warning-surface:#fefcf4; --color-warning-surface:oklch(99% .011 95);
+  --color-danger:#ff0005; --color-danger:oklch(62% .29 25);
+  --color-danger-ink:#5c0000; --color-danger-ink:oklch(28% .14 25);
+  --color-danger-surface:#ffe2dd; --color-danger-surface:oklch(95% .052 25);
+  --color-danger-border:#ed0000; --color-danger-border:oklch(56% .278 25);
+
+  --font-sans:"Inter",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:"Departure Mono",ui-monospace,monospace;
+  --font-size-9:9px; --font-size-10:10px; --font-size-11:11px; --font-size-12:12px;
+  --font-size-13:13px; --font-size-14:14px; --font-size-16:16px; --font-size-17:17px;
+  --font-size-18:18px; --font-size-20:20px; --font-size-28:28px; --font-size-32:32px;
+  --font-size-48:48px;
+  --font-weight-regular:400; --font-weight-medium:500;
+  --leading-none:1; --leading-tight:1.2; --leading-snug:1.35; --leading-base:1.4;
+  --leading-relaxed:1.5;
+  --tracking-tight:-0.0175em;
+
+  --space-2:2px; --space-4:4px; --space-6:6px; --space-8:8px; --space-10:10px;
+  --space-12:12px; --space-16:16px; --space-20:20px; --space-24:24px;
+  --space-32:32px; --space-40:40px; --space-48:48px;
+
+  --radius-2:2px; --radius-3:3px; --radius-4:4px; --radius-8:8px; --radius-10:10px;
+  --radius-12:12px; --radius-16:16px; --radius-18:18px; --radius-full:9999px;
+  --radius-circle:50%;
+
+  --shadow-card:0 0 0 .5px oklch(0% 0 0/.08),0 1px 1px -1px oklch(0% 0 0/.2),0 1px 2px oklch(0% 0 0/.08);
+  --shadow-sm:0 1px 2px oklch(0% 0 0/.06),0 0 0 1px oklch(0% 0 0/.05);
+  --shadow-md:0 1px 3px oklch(0% 0 0/.06),0 4px 12px oklch(0% 0 0/.05),0 0 0 1px oklch(0% 0 0/.04);
+  --shadow-lg:0 2px 5px oklch(0% 0 0/.06),0 10px 24px oklch(0% 0 0/.07),0 0 0 1px oklch(0% 0 0/.03);
+  --shadow-hairline-inset:inset 0 0 0 1px oklch(0% 0 0/.09);
+  --shadow-ring:0 0 0 2px oklch(0% 0 0/.063);
+
+  --duration-fast:120ms; --duration-base:180ms; --duration-medium:200ms;
+  --duration-slow:300ms; --duration-slower:500ms;
+  --ease-out-expo:cubic-bezier(0.16,1,0.3,1);
+  --ease-standard:cubic-bezier(0.4,0,0.2,1);
+  --ease-emphasized:cubic-bezier(0.2,0,0,1);
+}
+/* Breakpoints (can't be CSS vars in media queries): sm 640 · md 768 · lg 1024 · xl 1280 */
+@font-face{font-family:"Inter";src:url("/static/fonts/InterVariable.woff2") format("woff2");
+  font-weight:100 900;font-style:normal;font-display:swap;}
+@font-face{font-family:"Departure Mono";src:url("/static/fonts/DepartureMono-Regular.woff2") format("woff2");
+  font-weight:400;font-style:normal;font-display:swap;}

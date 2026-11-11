@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Submit a feed — dopefeed{% endblock %}
+{% block content %}
+<section class="hero hero-small">
+  <h1>Submit a feed</h1>
+  <p class="hero-sub">Paste an RSS or Atom feed, a site with a feed, or a YouTube channel. It is validated and added immediately.</p>
+</section>
+{% if let Some(error) = error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+<form class="submit-form" method="post" action="/submit">
+  <label class="field">
+    <span class="field-label">Feed or site URL</span>
+    <input class="input" type="url" name="url" required value="{{ url }}" placeholder="https://example.com/feed.xml">
+  </label>
+  <label class="field">
+    <span class="field-label">Category</span>
+    <select class="input" name="category" required>
+      {% for cat in categories %}<option value="{{ cat.name }}"{% if cat.selected %} selected{% endif %}>{{ cat.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="field">
+    <span class="field-label">Title <span class="meta">(optional)</span></span>
+    <input class="input" type="text" name="title" value="{{ title }}" maxlength="200">
+  </label>
+  <button type="submit" class="button">Submit feed</button>
+  <p class="meta">Five submissions per hour per address. Duplicates are rejected.</p>
+</form>
+{% endblock %}

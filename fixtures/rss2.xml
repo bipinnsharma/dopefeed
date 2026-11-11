@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Fixture Feed</title>
+    <link>https://example.com</link>
+    <description>A feed used by the test suite.</description>
+    <item>
+      <guid>fixture-1</guid>
+      <title>First post</title>
+      <link>https://example.com/first</link>
+      <pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate>
+      <author>ada@example.com (Ada)</author>
+      <description>A short summary of the first post.</description>
+      <content:encoded><![CDATA[<p>Hello <strong>world</strong></p><script>alert('x')</script><iframe src="https://evil.example"></iframe><style>body{display:none}</style><form action="/x"><input></form>]]></content:encoded>
+    </item>
+    <item>
+      <guid>fixture-2</guid>
+      <title>Second post</title>
+      <link>https://example.com/second</link>
+      <pubDate>Thu, 02 Jan 2025 10:00:00 GMT</pubDate>
+      <description>Summary only, no content body.</description>
+    </item>
+    <item>
+      <guid>fixture-3</guid>
+      <title>Third post</title>
+      <link>https://example.com/third</link>
+      <pubDate>Fri, 03 Jan 2025 10:00:00 GMT</pubDate>
+      <content:encoded><![CDATA[<p>Third body.</p>]]></content:encoded>
+    </item>
+  </channel>
+</rss>

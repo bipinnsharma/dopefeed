@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} — dopefeed{% endblock %}
+{% block content %}
+<article class="reader" data-post-id="{{ post.id }}">
+  <p class="meta reader-meta"><a href="/f/{{ post.feed_id }}">{{ post.feed_title }}</a> • {{ post.published_label }}{% if let Some(author) = post.author %} • {{ author }}{% endif %}</p>
+  <h1 class="reader-title">{{ post.title }}</h1>
+  {% if let Some(id) = youtube_id %}
+  <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/{{ id }}" title="Video"
+       loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+  {% endif %}
+  <div class="reader-body">{{ post.content_html|safe }}</div>
+  <p class="meta reader-origin"><a href="{{ post.url }}" rel="noopener noreferrer" target="_blank">Read original →</a></p>
+</article>
+{% endblock %}

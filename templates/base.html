@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}dopefeed{% endblock %}</title>
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="wordmark" href="/">dopefeed</a>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link" href="/">Directory</a>
+      <a class="nav-link" href="/my">My feed</a>
+      <a class="nav-link" href="/submit">Submit</a>
+      <a class="nav-link" href="/about">About</a>
+    </nav>
+  </div>
+</header>
+<main class="container">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <span class="meta">dopefeed · no accounts · no tracking</span>
+    <nav class="nav" aria-label="Footer">
+      <a class="nav-link" href="/about">About</a>
+      <a class="nav-link" href="/terms">Terms</a>
+      <a class="nav-link" href="/privacy">Privacy</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

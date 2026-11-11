@@ -1,0 +1,6 @@
+<p class="meta feed-count" id="feed-count">Showing {{ shown }} of {{ total }} feeds</p>
+<div class="feed-grid">
+{% for feed in feeds %}{% include "_feed_card.html" %}{% endfor %}
+</div>
+{% if feeds.is_empty() %}<div class="empty">No feeds found.</div>{% endif %}
+{% include "_feed_more.html" %}
