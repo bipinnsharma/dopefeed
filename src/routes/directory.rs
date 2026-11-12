@@ -8,7 +8,7 @@ use axum::{
     extract::{Query, State},
     response::Html,
 };
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 #[derive(Template)]
 #[template(path = "directory.html")]
@@ -114,44 +114,26 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
         .collect::<String>();
     let page = query.page.unwrap_or(1).max(1);
 
-    let mut filters = vec!["f.status = 'active'".to_string()];
-    let mut bindings: Vec<String> = Vec::new();
-    if !category.is_empty() {
-        filters.push("f.category = ?".into());
-        bindings.push(category.clone());
-    }
-    if !q.is_empty() {
-        filters.push("(f.title LIKE ? OR f.description LIKE ? OR f.domain LIKE ?)".into());
-        let like = format!("%{q}%");
-        bindings.extend([like.clone(), like.clone(), like]);
-    }
-    let where_sql = filters.join(" AND ");
+    let mut count =
+        QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM feeds f WHERE f.status = 'active'");
+    push_filters(&mut count, &category, &q);
+    let total = count.build_query_scalar::<i64>().fetch_one(pool).await?;
 
-    let mut count_query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*) FROM feeds f WHERE {where_sql}"
-    )));
-    for value in &bindings {
-        count_query = count_query.bind(value);
-    }
-    let total = count_query.fetch_one(pool).await?;
-
-    let mut feeds_query = sqlx::query_as::<_, Feed>(sqlx::AssertSqlSafe(format!(
+    let mut feeds = QueryBuilder::<Sqlite>::new(
         "SELECT f.id, f.site_url, f.domain, f.title, f.description, f.category,
          strftime('%b %d, %Y', f.last_fetched_at) AS fetched_label,
          (SELECT COUNT(*) FROM posts p WHERE p.feed_id = f.id) AS post_count,
          EXISTS(SELECT 1 FROM posts p WHERE p.feed_id = f.id
                 AND p.published_at >= datetime('now', '-48 hours')) AS has_new_post
-         FROM feeds f WHERE {where_sql}
-         ORDER BY f.created_at DESC, f.id DESC LIMIT ? OFFSET ?"
-    )));
-    for value in &bindings {
-        feeds_query = feeds_query.bind(value);
-    }
-    let feeds = feeds_query
-        .bind(PAGE_SIZE)
-        .bind((page - 1) * PAGE_SIZE)
-        .fetch_all(pool)
-        .await?;
+         FROM feeds f WHERE f.status = 'active'",
+    );
+    push_filters(&mut feeds, &category, &q);
+    feeds
+        .push(" ORDER BY f.created_at DESC, f.id DESC LIMIT ")
+        .push_bind(PAGE_SIZE)
+        .push(" OFFSET ")
+        .push_bind((page - 1) * PAGE_SIZE);
+    let feeds = feeds.build_query_as::<Feed>().fetch_all(pool).await?;
 
     Ok(FeedPage {
         feeds,
@@ -162,4 +144,22 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
         page,
         has_more: page * PAGE_SIZE < total,
     })
+}
+
+/// Values are always bound; only the fixed filter fragments are dynamic SQL.
+fn push_filters(query: &mut QueryBuilder<Sqlite>, category: &str, q: &str) {
+    if !category.is_empty() {
+        query.push(" AND f.category = ").push_bind(category);
+    }
+    if !q.is_empty() {
+        let like = format!("%{q}%");
+        query
+            .push(" AND (f.title LIKE ")
+            .push_bind(like.clone())
+            .push(" OR f.description LIKE ")
+            .push_bind(like.clone())
+            .push(" OR f.domain LIKE ")
+            .push_bind(like)
+            .push(")");
+    }
 }

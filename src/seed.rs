@@ -487,8 +487,10 @@ pub async fn run(pool: SqlitePool, config: Config) -> anyhow::Result<()> {
                 }
                 Err(error) => {
                     tracing::warn!(%url, %error, "seed fetch failed, adding placeholder");
-                    if let Err(error) = insert_placeholder(&state, raw_url, title, category).await {
-                        tracing::warn!(%url, %error, "placeholder insert failed");
+                    if let Err(insert_error) =
+                        insert_placeholder(&state, raw_url, title, category, &error).await
+                    {
+                        tracing::warn!(%url, %insert_error, "placeholder insert failed");
                     }
                 }
             }
@@ -508,11 +510,13 @@ pub async fn run(pool: SqlitePool, config: Config) -> anyhow::Result<()> {
 }
 
 /// Offline fallback so a fresh clone has a populated directory without network.
-async fn insert_placeholder(
+/// Stores the real site URL (never `discover:`) so the worker can retry discovery.
+pub(crate) async fn insert_placeholder(
     state: &AppState,
     raw_url: &str,
     title: &str,
     category: &str,
+    error: &str,
 ) -> anyhow::Result<()> {
     let url = Url::parse(raw_url)?;
     let domain = url
@@ -522,8 +526,9 @@ async fn insert_placeholder(
         .to_string();
     let site_url = url.origin().ascii_serialization();
     sqlx::query(
-        "INSERT INTO feeds (url, site_url, domain, title, category, status, next_fetch_at)
-         VALUES (?, ?, ?, ?, ?, 'active', datetime('now', '+60 seconds'))
+        "INSERT INTO feeds (url, site_url, domain, title, category, status,
+         last_error, next_fetch_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, datetime('now', '+60 seconds'))
          ON CONFLICT(url) DO NOTHING",
     )
     .bind(url.to_string())
@@ -531,6 +536,7 @@ async fn insert_placeholder(
     .bind(domain)
     .bind(title)
     .bind(category)
+    .bind(error)
     .execute(&state.pool)
     .await?;
     Ok(())

@@ -85,6 +85,22 @@ CREATE INDEX idx_feeds_cat ON feeds(category);
 Derived: `post_count` = COUNT(posts); `has_new_post` = latest published_at within
 48h. NO reader counts, NO users/subscriptions/read tables (client-side only).
 
+### 4a. Timestamp storage (pinned · correctness)
+Every timestamp column (`published_at`, `last_fetched_at`, `next_fetch_at`,
+`created_at`) stores UTC `YYYY-MM-DD HH:MM:SS`. All writes go through one helper;
+never store a raw RFC3339/`to_rfc3339()` string. The worker compares
+`next_fetch_at <= datetime('now')` lexicographically, and `'T' > ' '`, so a
+T-format value would never be due.
+
+```rust
+pub fn sqlite_time(time: DateTime<Utc>) -> String {
+    time.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+```
+
+Regression test: `sqlite_time_round_trips_as_space_format` (parsed RFC3339 →
+space format → parses back to the same instant).
+
 ## 5. Categories (fixed)
 `ai, ceo, coding, design, dev, lifestyle, product, startup, tech, writing, youtube`
 Chips: ALL AI CEO CODING DESIGN DEV LIFESTYLE PRODUCT STARTUP TECH WRITING YOUTUBE.
@@ -104,6 +120,16 @@ Chips: ALL AI CEO CODING DESIGN DEV LIFESTYLE PRODUCT STARTUP TECH WRITING YOUTU
 | GET | /healthz | 200, checks `SELECT 1` |
 Unknown ids → 404 error page. POST /submit requires Origin/Referer host ==
 BASE_URL host, else 403. No other mutations exist.
+
+### 6a. Dynamic SQL (pinned · security)
+No user input ever enters the SQL *shape*. Use `sqlx::QueryBuilder` and bind every
+value (directory filters and the timeline `IN` list). `category` is matched
+against the §5 enum before use; timeline ids are parsed to `i64` and rejected with
+400 otherwise; `q` is a bound `LIKE` value. Never use `AssertSqlSafe` or
+`format!` to splice values into SQL.
+
+Regression tests: `directory_query_values_are_bound`,
+`timeline_rejects_injection`.
 
 ## 7. UI — design system binding (recent.design tokens)
 Load order in base.html: `tokens.css` → `app.css` → htmx → `app.js` (defer).
@@ -157,6 +183,8 @@ Element → token mapping (implement exactly):
 - Directory behavior: chips + search (keyup debounce 300ms) via htmx GET /feeds
   swapping `#feed-grid`; "Showing X of Y feeds" + "Load more" (append, hide at
   end); ordering `created_at DESC, id DESC`; empty search → "No feeds found."
+- Static assets: `Cache-Control: public, max-age=86400` in release; `no-cache`
+  in debug so CSS/JS edits show without hard-refreshing.
 
 ## 8. Fetch worker (in-process)
 Tick 60s: select ≤50 active feeds with `next_fetch_at <= now`, oldest first.
@@ -190,6 +218,29 @@ Fields: `url` (feed/site/YouTube channel), `category`, optional `title`.
    /f/{id}?msg=added.
 Rate limit: 5 submissions/hour/IP (in-memory). Body limit 64KB.
 
+### 9a. YouTube discovery (pinned)
+For any youtube.com URL fetch the channel page with a browser User-Agent and
+`Cookie: CONSENT=YES+; SOCS=CAI`. Extract the channel id from the first match of
+`"channelId":"UC…"`, `"externalId":"UC…"`, `"browseId":"UC…"`,
+`/channel/(UC[\w-]{22})`, or `itemprop="identifier" content="UC…"`. Build
+`https://www.youtube.com/feeds/videos.xml?channel_id={id}` and require ≥1 entry
+before inserting; a 404/empty feed means the id is wrong. A `/channel/UC…` URL or
+`?channel_id=UC…` is used directly. feed-rs rejects empty text elements (common in
+YouTube feeds), so `parse_feed` strips exact empty element pairs and retries.
+
+### 9b. SSRF hardening (pinned · security)
+Validate every redirect hop and pin the resolved addresses so the connection uses
+exactly what was checked (defeats DNS rebinding). `SafeResolver` implements
+`reqwest::dns::Resolve`; it rejects the request when any resolved address is
+blocked. Blocklist: loopback, private, link-local, unique-local, multicast, CGNAT,
+`0.0.0.0/8`, and IPv6 `::` (unspecified); re-check the embedded IPv4 of
+IPv4-mapped addresses.
+
+Test-only loopback exception is the cargo feature `ssrf-test-exception` (plus
+`cfg!(test)` for unit tests), never a release path. Release builds leave the
+feature off. Regression tests: `ssrf_blocks_private_and_local_targets`,
+`resolver_rejects_blocked_addresses`.
+
 ## 10. Local subscriptions & read state (`static/app.js`, no server state)
 localStorage keys: `dopefeed.subs` = JSON array of feed ids;
 `dopefeed.read` = JSON array of post ids (FIFO cap 5000).
@@ -206,19 +257,19 @@ localStorage keys: `dopefeed.subs` = JSON array of feed ids;
   subscribing and /my require JS (note this in README).
 
 ## 11. Seed (`cargo run -- seed`, idempotent)
-Same 16 feeds as before — verify each via the fetcher; substitute dead URLs via
-auto-discovery, note in DECISIONS.md:
-Daring Fireball https://daringfireball.net/feeds/main tech · Simon Willison
-https://simonwillison.net/atom/everything/ coding · The Verge
-https://www.theverge.com/rss/index.xml tech · CSS-Tricks https://css-tricks.com/feed/
-coding · GitHub Blog https://github.blog/feed/ product · Paul Graham
-http://www.aaronsw.com/2002/feeds/pgessays.rss ceo · antirez http://antirez.com/rss
-coding · Mitchell Hashimoto https://mitchellh.com/feed.xml coding · Dan Luu
-https://danluu.com/atom.xml coding · 阮一峰 https://www.ruanyifeng.com/blog/atom.xml
-coding · Sam Altman https://blog.samaltman.com/posts.atom ceo · Andrej Karpathy
-https://karpathy.bearblog.dev/feed/ ai · Josh Comeau https://www.joshwcomeau.com/rss.xml
-coding · Maggie Appleton https://maggieappleton.com/rss.xml ai · Derek Sivers
-https://sive.rs/en.atom writing · Zed Blog https://zed.dev/blog.rss product
+The curated list lives in `src/seed.rs`: 177 titles/categories/URLs covering
+design, coding, AI, startups and YouTube. `discover:` marks a site URL; the fetcher
+auto-discovers its feed before insert.
+
+### 11a. Seed placeholder (pinned · correctness)
+When a seed URL cannot be resolved or fetched, insert a placeholder whose `url` is
+the real site URL — never the literal `discover:` prefix. Set `last_error`, keep
+`status='active'`, and let the worker retry discovery for 0-post rows with normal
+backoff. Log dead seeds at `WARN`. Idempotent via the unique `url`.
+
+Acceptance: every discover: YouTube row with a public channel resolves to a
+verified `channel_id` feed and is inserted; after seeding,
+`SELECT count(*) FROM feeds WHERE category='youtube'` ≥ 10.
 
 ## 12. Milestones & acceptance
 M0 Skeleton: config/error/db/router//healthz/tracing/graceful shutdown/.env.example.
@@ -246,6 +297,18 @@ M6 Hardening + deploy: compression, static cache headers, request tracing,
    multi-stage Dockerfile (non-root, VOLUME /app/data), README (setup/seed/
    fonts/limits), DECISIONS.md. ✅ docker build ok; container /healthz 200.
 
+### 12a. Review regression tests (required)
+- `sqlite_time_round_trips_as_space_format` — parsed RFC3339 → space format →
+  parsed back to the same instant.
+- `directory_query_values_are_bound` — `q=' OR 1=1--` matches nothing; invalid
+  `category` never reaches SQL.
+- `timeline_rejects_injection` — `feeds=1;DROP TABLE posts` → 400; posts intact.
+- `ssrf_blocks_private_and_local_targets` — includes `0.0.0.0/8` and `::`.
+- `resolver_rejects_blocked_addresses` — the validating resolver rejects a
+  blocked address before connect.
+- `seed_placeholder` — placeholder URL has no `discover:` prefix and
+  `last_error` is set (covered by live seed + worker retry path).
+
 ## 13. Definition of Done
 - [ ] Fresh clone: `cp .env.example .env && cargo run -- seed && cargo run` →
       populated directory within 2 min, styled per §7.
@@ -255,6 +318,10 @@ M6 Hardening + deploy: compression, static cache headers, request tracing,
 - [ ] No auth anywhere: no cookies, no users table, no login routes.
 - [ ] fmt/clippy/test clean; no unwrap in handlers/worker; only sanitized HTML
       rendered |safe; app.css contains no raw color literals.
+- [ ] No timestamp column contains a `T` separator.
+- [ ] No user input reaches a SQL shape string; dynamic queries use QueryBuilder.
+- [ ] SSRF connects only to validated addresses; `0.0.0.0/8` and `::` blocked.
+- [ ] `cargo test` passes; `cargo test --features ssrf-test-exception` passes.
 
 ## 14. Non-goals (v1)
 Accounts/auth/profiles/admin/review queue, server-side read state, email digest,

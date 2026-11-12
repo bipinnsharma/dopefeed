@@ -172,6 +172,7 @@ async fn refresh_handles_304_as_success() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
     assert_eq!(post_count(&state.pool, id).await, 0);
@@ -208,6 +209,7 @@ async fn refresh_success_adapts_interval() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -242,6 +244,7 @@ async fn refresh_failure_backs_off() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -282,6 +285,7 @@ async fn refresh_rejects_oversized_body() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
     let last_error: Option<String> =
@@ -304,7 +308,9 @@ async fn ssrf_blocks_private_and_local_targets() {
         "192.168.1.1",
         "169.254.1.1",
         "0.0.0.0",
+        "0.1.2.3",
         "100.64.0.1",
+        "::",
         "::1",
         "fc00::1",
         "fe80::1",
@@ -326,6 +332,14 @@ async fn ssrf_blocks_private_and_local_targets() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn resolver_rejects_blocked_addresses() {
+    use reqwest::dns::Resolve;
+
+    let name = "0.0.0.0".parse().unwrap();
+    assert!(ssrf::SafeResolver.resolve(name).await.is_err());
 }
 
 // ---------- M4: timeline ----------
@@ -392,6 +406,65 @@ async fn timeline_validates_and_filters() {
         .await
         .unwrap();
     assert_eq!(response.status(), 400);
+}
+
+#[tokio::test]
+async fn timeline_rejects_injection() {
+    let (base, state) = spawn_app().await;
+    let feed = add_feed(&state.pool, "https://a.example/feed", "active").await;
+    add_post(&state.pool, feed, "a-1", "A post", "2025-01-01 10:00:00").await;
+
+    let client = Client::new();
+    for bad in ["1;DROP%20TABLE%20posts", "1%20OR%201%3D1", "1)--"] {
+        let response = client
+            .get(format!("{base}/api/timeline?feeds={bad}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{bad} should be rejected");
+    }
+    assert_eq!(post_count(&state.pool, feed).await, 1);
+}
+
+#[tokio::test]
+async fn directory_query_values_are_bound() {
+    let (base, state) = spawn_app().await;
+    add_feed(&state.pool, "https://one.example/feed", "active").await;
+    let client = Client::new();
+
+    let injected = client
+        .get(format!("{base}/feeds?q=%27%20OR%201%3D1--"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(injected.status(), 200);
+    assert!(!injected.text().await.unwrap().contains("Fixture Feed"));
+
+    // Invalid categories never reach SQL; they fall back to no category filter.
+    let category = client
+        .get(format!("{base}/feeds?category=%27%20OR%201%3D1--"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(category.status(), 200);
+    assert!(category.text().await.unwrap().contains("Fixture Feed"));
+}
+
+#[test]
+fn sqlite_time_round_trips_as_space_format() {
+    use chrono::{TimeZone, Utc};
+
+    let time = Utc.with_ymd_and_hms(2026, 11, 12, 10, 30, 0).unwrap();
+    assert_eq!(fetch::sqlite_time(time), "2026-11-12 10:30:00");
+
+    let from_feed = chrono::DateTime::parse_from_rfc3339("2026-11-12T10:30:00+00:00")
+        .unwrap()
+        .with_timezone(&Utc);
+    assert_eq!(fetch::sqlite_time(from_feed), "2026-11-12 10:30:00");
+
+    let parsed =
+        chrono::NaiveDateTime::parse_from_str("2026-11-12 10:30:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    assert_eq!(parsed.and_utc(), time);
 }
 
 #[tokio::test]
@@ -540,6 +613,43 @@ fn youtube_channel_id_is_extracted() {
         crate::worker::discover::extract_channel_id(html).as_deref(),
         Some("UCcccccccccccccccccccccc")
     );
+}
+
+#[tokio::test]
+async fn seed_placeholder_keeps_real_url_and_error() {
+    let state = test_state().await;
+    crate::seed::insert_placeholder(
+        &state,
+        "https://unreachable.invalid",
+        "Dead Feed",
+        "tech",
+        "dns failed",
+    )
+    .await
+    .unwrap();
+    crate::seed::insert_placeholder(
+        &state,
+        "https://unreachable.invalid",
+        "Dead Feed",
+        "tech",
+        "dns failed",
+    )
+    .await
+    .unwrap();
+
+    let (url, error, status): (String, Option<String>, String) =
+        sqlx::query_as("SELECT url, last_error, status FROM feeds")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(url, "https://unreachable.invalid/");
+    assert_eq!(error.as_deref(), Some("dns failed"));
+    assert_eq!(status, "active");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feeds")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
 }
 
 #[test]

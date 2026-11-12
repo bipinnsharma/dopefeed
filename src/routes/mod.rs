@@ -45,10 +45,15 @@ async fn cache_static(request: Request<axum::body::Body>, next: Next) -> Respons
     let is_static = request.uri().path().starts_with("/static/");
     let mut response = next.run(request).await;
     if is_static {
-        response.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=86400"),
-        );
+        // Debug builds revalidate so CSS/JS edits show immediately.
+        let policy = if cfg!(debug_assertions) {
+            "no-cache"
+        } else {
+            "public, max-age=86400"
+        };
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
     }
     response
 }

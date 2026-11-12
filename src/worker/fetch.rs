@@ -9,7 +9,7 @@ use reqwest::{
 use scraper::Html;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use url::Url;
 
 const MAX_ENTRIES: usize = 500;
@@ -24,14 +24,17 @@ pub struct DueFeed {
     pub fetch_interval_secs: i64,
     pub error_count: i64,
     pub domain: String,
+    pub post_count: i64,
 }
 
 pub fn http_client(base_url: &str) -> anyhow::Result<Client> {
+    let resolver: Arc<dyn reqwest::dns::Resolve> = Arc::new(ssrf::SafeResolver);
     Ok(Client::builder()
         .timeout(Duration::from_secs(20))
         .user_agent(format!("dopefeed/1.0 (+{base_url})"))
         .redirect(reqwest::redirect::Policy::none())
         .gzip(true)
+        .dns_resolver(resolver)
         .build()?)
 }
 
@@ -73,11 +76,8 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
     }
 
     let Some(parsed) = discover::parse_feed(&fetched.body) else {
-        record_failure(state, feed, "Could not parse feed").await?;
-        return Ok(());
+        return retry_discovery(state, feed).await;
     };
-
-    let new = ingest(&state.pool, feed.id, &parsed, &feed.site_url).await?;
 
     if let Some(title) = parsed
         .title
@@ -96,8 +96,57 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
         .await?;
     }
 
+    let new = ingest(&state.pool, feed.id, &parsed, &feed.site_url).await?;
     succeed(state, feed, new, &fetched.headers).await?;
     Ok(())
+}
+
+/// A 0-post row may be a seed placeholder pointing at a site page. Retry
+/// discovery before backing off, then switch the row to the real feed URL.
+async fn retry_discovery(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
+    if feed.post_count > 0 {
+        return record_failure(state, feed, "Could not parse feed").await;
+    }
+    let url = Url::parse(&feed.url).map_err(|e| anyhow!("bad feed url: {e}"))?;
+    match discover::resolve(&state.http, &url).await {
+        Ok(resolved) => {
+            sqlx::query(
+                "UPDATE feeds SET url = ?, site_url = ?, description = COALESCE(?, description)
+                 WHERE id = ?",
+            )
+            .bind(&resolved.feed_url)
+            .bind(&resolved.site_url)
+            .bind(&resolved.description)
+            .bind(feed.id)
+            .execute(&state.pool)
+            .await?;
+            if let Some(title) = resolved.title.as_deref() {
+                sqlx::query(
+                    "UPDATE feeds SET title = ? WHERE id = ?
+                     AND (SELECT COUNT(*) FROM posts WHERE feed_id = ?) = 0",
+                )
+                .bind(title)
+                .bind(feed.id)
+                .bind(feed.id)
+                .execute(&state.pool)
+                .await?;
+            }
+            let new = ingest(&state.pool, feed.id, &resolved.feed, &resolved.site_url).await?;
+            let mut headers = HeaderMap::new();
+            if let Some(etag) = &resolved.etag
+                && let Ok(value) = HeaderValue::from_str(etag)
+            {
+                headers.insert(ETAG, value);
+            }
+            if let Some(modified) = &resolved.last_modified
+                && let Ok(value) = HeaderValue::from_str(modified)
+            {
+                headers.insert(LAST_MODIFIED, value);
+            }
+            succeed(state, feed, new, &headers).await
+        }
+        Err(error) => record_failure(state, feed, &error).await,
+    }
 }
 
 async fn succeed(

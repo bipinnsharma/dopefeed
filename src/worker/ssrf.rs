@@ -1,12 +1,58 @@
 use reqwest::{
     Client, StatusCode,
+    dns::{Addrs, Name, Resolve, Resolving},
     header::{HeaderMap, HeaderValue, LOCATION},
 };
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    error::Error,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 use url::Url;
 
 pub const MAX_BODY: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+
+/// Validating resolver: the addresses reqwest actually connects to are the ones
+/// checked here, so a second DNS answer cannot bypass the SSRF blocklist.
+pub struct SafeResolver;
+
+impl Resolve for SafeResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(boxed)?
+                .collect::<Vec<_>>();
+            if addrs.is_empty() {
+                return Err(boxed_message("Could not resolve that host."));
+            }
+            if addrs.iter().any(|addr| blocked(addr.ip())) {
+                return Err(boxed_message("That address is not allowed."));
+            }
+            Ok(Box::new(addrs.into_iter()) as Addrs)
+        })
+    }
+}
+
+fn boxed(error: impl Error + Send + Sync + 'static) -> Box<dyn Error + Send + Sync> {
+    Box::new(error)
+}
+
+fn boxed_message(message: &'static str) -> Box<dyn Error + Send + Sync> {
+    Box::new(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        message,
+    ))
+}
+
+fn allow_loopback() -> bool {
+    cfg!(any(test, feature = "ssrf-test-exception"))
+}
+
+fn blocked(ip: IpAddr) -> bool {
+    is_blocked(ip) && !(allow_loopback() && ip.is_loopback())
+}
 
 pub struct Fetched {
     pub final_url: Url,
@@ -28,11 +74,7 @@ pub async fn check_url(url: &Url) -> Result<(), String> {
     let mut resolved = false;
     for addr in addrs {
         resolved = true;
-        if is_blocked(addr.ip()) {
-            // Tests run against a loopback wiremock; release builds never skip.
-            if cfg!(test) && addr.ip().is_loopback() {
-                continue;
-            }
+        if blocked(addr.ip()) {
             return Err("That address is not allowed.".into());
         }
     }

@@ -8,6 +8,7 @@ use axum::{
     extract::{Query, State},
     response::Html,
 };
+use sqlx::{QueryBuilder, Sqlite};
 
 #[derive(Template)]
 #[template(path = "my.html")]
@@ -53,22 +54,20 @@ pub async fn timeline(
     }
 
     let page = query.page.unwrap_or(1).max(1);
-    let placeholders = vec!["?"; ids.len()].join(",");
-    let sql = format!(
+    let mut rows = QueryBuilder::<Sqlite>::new(format!(
         "SELECT {POST_COLUMNS} FROM posts p JOIN feeds f ON f.id = p.feed_id
-         WHERE f.status = 'active' AND p.feed_id IN ({placeholders})
-         ORDER BY p.published_at DESC, p.id DESC LIMIT ? OFFSET ?"
-    );
-
-    let mut rows = sqlx::query_as::<_, Post>(sqlx::AssertSqlSafe(sql));
+         WHERE f.status = 'active' AND p.feed_id IN ("
+    ));
+    let mut ids_sql = rows.separated(", ");
     for id in &ids {
-        rows = rows.bind(id);
+        ids_sql.push_bind(*id);
     }
-    let posts = rows
-        .bind(TIMELINE_PAGE + 1)
-        .bind((page - 1) * TIMELINE_PAGE)
-        .fetch_all(&state.pool)
-        .await?;
+    ids_sql.push_unseparated(")");
+    rows.push(" ORDER BY p.published_at DESC, p.id DESC LIMIT ")
+        .push_bind(TIMELINE_PAGE + 1)
+        .push(" OFFSET ")
+        .push_bind((page - 1) * TIMELINE_PAGE);
+    let posts = rows.build_query_as::<Post>().fetch_all(&state.pool).await?;
     let has_more = posts.len() as i64 > TIMELINE_PAGE;
     let posts = posts.into_iter().take(TIMELINE_PAGE as usize).collect();
     let feeds = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
