@@ -474,6 +474,33 @@ async fn timeline_rejects_injection() {
 }
 
 #[tokio::test]
+async fn directory_orders_by_newest_post() {
+    let (base, state) = spawn_app().await;
+    let older = add_feed(&state.pool, "https://a.example/feed", "active").await;
+    let newer = add_feed(&state.pool, "https://b.example/feed", "active").await;
+    for (id, title) in [(older, "Older feed"), (newer, "Newer feed")] {
+        sqlx::query("UPDATE feeds SET title = ? WHERE id = ?")
+            .bind(title)
+            .bind(id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+    add_post(&state.pool, older, "a1", "A post", "2026-11-12 00:00:00").await;
+    add_post(&state.pool, newer, "b1", "B post", "2026-11-01 00:00:00").await;
+
+    let html = Client::new()
+        .get(format!("{base}/feeds"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.find("Older feed") < html.find("Newer feed"));
+}
+
+#[tokio::test]
 async fn directory_query_values_are_bound() {
     let (base, state) = spawn_app().await;
     add_feed(&state.pool, "https://one.example/feed", "active").await;

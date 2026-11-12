@@ -192,7 +192,8 @@ Element → token mapping (implement exactly):
   animation: none !important; } }`.
 - Directory behavior: chips + search (keyup debounce 300ms) via htmx GET /feeds
   swapping `#feed-grid`; "Showing X of Y feeds" + "Load more" (append, hide at
-  end); ordering `created_at DESC, id DESC`; empty search → "No feeds found."
+  end); ordering newest post first (`MAX(published_at)` desc, NULLs last), then
+  `created_at DESC, id DESC`; empty search → "No feeds found."
 - Static assets: `Cache-Control: public, max-age=86400` in release; `no-cache`
   in debug so CSS/JS edits show without hard-refreshing.
 

@@ -129,7 +129,10 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
     );
     push_filters(&mut feeds, &category, &q);
     feeds
-        .push(" ORDER BY f.created_at DESC, f.id DESC LIMIT ")
+        .push(
+            " ORDER BY (SELECT MAX(p.published_at) FROM posts p WHERE p.feed_id = f.id) DESC,
+             f.created_at DESC, f.id DESC LIMIT ",
+        )
         .push_bind(PAGE_SIZE)
         .push(" OFFSET ")
         .push_bind((page - 1) * PAGE_SIZE);
