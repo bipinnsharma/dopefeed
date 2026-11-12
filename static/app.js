@@ -63,6 +63,20 @@
     });
   });
 
+  document.querySelectorAll("select[data-autosubmit]").forEach(function (select) {
+    select.addEventListener("change", function () {
+      if (select.form) select.form.submit();
+    });
+  });
+
+  var path = location.pathname.replace(/\/+$/, "") || "/";
+  document.querySelectorAll(".side-link, .mobile-link").forEach(function (link) {
+    if (link.getAttribute("href") === path) {
+      link.classList.add("is-active");
+      link.setAttribute("aria-current", "page");
+    }
+  });
+
   var timeline = document.getElementById("timeline");
   if (timeline) {
     if (subs.length === 0) {

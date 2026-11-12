@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}dopefeed{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/app.css">
+{% block head %}{% endblock %}
+<script src="/static/app.js" defer></script>
+</head>
+<body class="reader-page">
+<header class="reader-bar">
+  <a class="reader-brand" href="/"><img src="/static/logo.svg" alt="" width="22" height="22">dopefeed</a>
+</header>
+<main class="reader-main">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

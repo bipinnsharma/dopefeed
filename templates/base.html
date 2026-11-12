@@ -12,29 +12,61 @@
 <script src="/static/app.js" defer></script>
 </head>
 <body>
-<header class="site-header">
-  <div class="container header-inner">
-    <a class="wordmark" href="/"><img class="wordmark-mark" src="/static/logo.svg" alt="" aria-hidden="true" width="24" height="24">dopefeed</a>
-    <nav class="nav" aria-label="Main">
-      <a class="nav-link" href="/">Directory</a>
-      <a class="nav-link" href="/my">My feed</a>
-      <a class="nav-link" href="/submit">Submit</a>
-      <a class="nav-link" href="/about">About</a>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="dopefeed home">
+      <img src="/static/logo.svg" alt="" width="28" height="28">
+    </a>
+    <nav class="side-nav" aria-label="Main">
+      <p class="side-label">Browse</p>
+      <a class="side-link" href="/">Directory</a>
+      <a class="side-link" href="/my">My feed</a>
+      <a class="side-link" href="/websites">Websites</a>
+      <a class="side-link" href="/about">About</a>
+      <a class="side-link" href="/submit">Submit</a>
+      <p class="side-label">Resources</p>
+      <a class="side-link" href="/links">Links</a>
+      <a class="side-link" href="/skills">Skills</a>
     </nav>
-  </div>
-</header>
-<main class="container">
-{% block content %}{% endblock %}
-</main>
-<footer class="site-footer">
-  <div class="container footer-inner">
-    <span class="meta">dopefeed · no accounts · no tracking</span>
-    <nav class="nav" aria-label="Footer">
-      <a class="nav-link" href="/about">About</a>
-      <a class="nav-link" href="/terms">Terms</a>
-      <a class="nav-link" href="/privacy">Privacy</a>
+  </aside>
+
+  <div class="app-main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <span class="topbar-name">Dopefeed</span>
+        <p class="topbar-sub">A hand-picked directory of RSS, Atom and YouTube feeds.</p>
+      </div>
+      {% block search %}<form class="topbar-search" role="search" action="/" method="get">
+        <input class="search-input" type="search" name="q" placeholder="Search feeds…"
+               aria-label="Search feeds" autocomplete="off">
+      </form>{% endblock %}
+    </header>
+
+    <nav class="mobile-nav" aria-label="Main">
+      <a class="mobile-link" href="/">Directory</a>
+      <a class="mobile-link" href="/my">My feed</a>
+      <a class="mobile-link" href="/websites">Websites</a>
+      <a class="mobile-link" href="/about">About</a>
+      <a class="mobile-link" href="/submit">Submit</a>
+      <a class="mobile-link" href="/links">Links</a>
+      <a class="mobile-link" href="/skills">Skills</a>
     </nav>
+
+    <main class="app-content">
+    {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span class="meta">dopefeed · no accounts · no tracking</span>
+        <nav class="nav" aria-label="Footer">
+          <a class="nav-link" href="/about">About</a>
+          <a class="nav-link" href="/terms">Terms</a>
+          <a class="nav-link" href="/privacy">Privacy</a>
+        </nav>
+      </div>
+    </footer>
   </div>
-</footer>
+</div>
 </body>
 </html>

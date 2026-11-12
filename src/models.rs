@@ -33,6 +33,23 @@ impl Feed {
     pub fn is_new(&self) -> bool {
         self.has_new_post != 0
     }
+
+    pub fn category_label(&self) -> &'static str {
+        match self.category.as_str() {
+            "ai" => "AI",
+            "ceo" => "CEO",
+            "coding" => "Coding",
+            "design" => "Design",
+            "dev" => "Dev",
+            "lifestyle" => "Lifestyle",
+            "product" => "Product",
+            "startup" => "Startups",
+            "tech" => "Tech",
+            "writing" => "Writing",
+            "youtube" => "YouTube",
+            _ => "Other",
+        }
+    }
 }
 
 #[derive(Clone, Debug, sqlx::FromRow)]
@@ -95,6 +112,7 @@ pub struct DirectoryQuery {
     pub q: Option<String>,
     pub page: Option<i64>,
     pub more: Option<String>,
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +132,7 @@ pub struct FeedPage {
     pub shown: i64,
     pub category: String,
     pub q: String,
+    pub sort: String,
     pub page: i64,
     pub has_more: bool,
 }

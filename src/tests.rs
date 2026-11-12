@@ -501,6 +501,90 @@ async fn directory_orders_by_newest_post() {
 }
 
 #[tokio::test]
+async fn directory_sorts_by_popular_and_falls_back_to_recent() {
+    let (base, state) = spawn_app().await;
+    let small = add_feed(&state.pool, "https://a.example/feed", "active").await;
+    let big = add_feed(&state.pool, "https://b.example/feed", "active").await;
+    for (id, title) in [(small, "Small feed"), (big, "Big feed")] {
+        sqlx::query("UPDATE feeds SET title = ? WHERE id = ?")
+            .bind(title)
+            .bind(id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+    add_post(&state.pool, small, "s1", "S post", "2026-11-12 00:00:00").await;
+    for guid in ["b1", "b2", "b3"] {
+        add_post(&state.pool, big, guid, "B post", "2026-11-01 00:00:00").await;
+    }
+
+    let client = Client::new();
+    let popular = client
+        .get(format!("{base}/feeds?sort=popular"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(popular.find("Big feed") < popular.find("Small feed"));
+
+    // Unknown sort values fall back to newest-post-first.
+    let fallback = client
+        .get(format!("{base}/feeds?sort=bogus"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(fallback.find("Small feed") < fallback.find("Big feed"));
+}
+
+#[tokio::test]
+async fn directory_sort_oldest_uses_feed_created_at() {
+    let (base, state) = spawn_app().await;
+    let first = add_feed(&state.pool, "https://a.example/feed", "active").await;
+    let second = add_feed(&state.pool, "https://b.example/feed", "active").await;
+    for (id, title, created) in [
+        (first, "First feed", "2026-01-01 00:00:00"),
+        (second, "Second feed", "2026-06-01 00:00:00"),
+    ] {
+        sqlx::query("UPDATE feeds SET title = ?, created_at = ? WHERE id = ?")
+            .bind(title)
+            .bind(created)
+            .bind(id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+    // The older feed has the newer post; oldest sort ignores post recency.
+    add_post(&state.pool, first, "a1", "A post", "2026-01-01 00:00:00").await;
+    add_post(&state.pool, second, "b1", "B post", "2026-11-12 00:00:00").await;
+
+    let html = Client::new()
+        .get(format!("{base}/feeds?sort=oldest"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.find("First feed") < html.find("Second feed"));
+}
+
+#[tokio::test]
+async fn new_static_pages_render_in_shell() {
+    let (base, _state) = spawn_app().await;
+    let client = Client::new();
+    for path in ["/websites", "/links", "/skills"] {
+        let response = client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(response.status(), 200, "{path}");
+        assert!(response.text().await.unwrap().contains("side-nav"));
+    }
+}
+
+#[tokio::test]
 async fn directory_query_values_are_bound() {
     let (base, state) = spawn_app().await;
     add_feed(&state.pool, "https://one.example/feed", "active").await;

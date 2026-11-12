@@ -38,6 +38,9 @@ pub fn router(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/about", get(static_pages::about))
+        .route("/websites", get(static_pages::websites))
+        .route("/links", get(static_pages::links))
+        .route("/skills", get(static_pages::skills))
         .route("/terms", get(static_pages::terms))
         .route("/privacy", get(static_pages::privacy))
         .route("/healthz", get(static_pages::healthz))

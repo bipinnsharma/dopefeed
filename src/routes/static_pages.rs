@@ -29,6 +29,16 @@ and read state stay in your browser's localStorage.</p><p>The server logs standa
 request metadata (method, path, status) for operation and abuse prevention. Submitted \
 feeds and their public content are stored on the server.</p>";
 
+const WEBSITES: &str = "<p>A hand-picked roll of the sites behind the feeds — personal \
+blogs, studios, and publications worth visiting directly.</p>\
+<p class=\"meta\">Curated websites are coming soon.</p>";
+
+const LINKS: &str = "<p>A running list of good corners of the web: tools, essays, and \
+rabbit holes worth keeping.</p><p class=\"meta\">Curated links are coming soon.</p>";
+
+const SKILLS: &str = "<p>Small, reusable workflows for reading and publishing on the \
+open web.</p><p class=\"meta\">Skills are coming soon.</p>";
+
 pub async fn about() -> AppResult<Html<String>> {
     Ok(Html(render("About", ABOUT)?))
 }
@@ -39,6 +49,18 @@ pub async fn terms() -> AppResult<Html<String>> {
 
 pub async fn privacy() -> AppResult<Html<String>> {
     Ok(Html(render("Privacy", PRIVACY)?))
+}
+
+pub async fn websites() -> AppResult<Html<String>> {
+    Ok(Html(render("Websites", WEBSITES)?))
+}
+
+pub async fn links() -> AppResult<Html<String>> {
+    Ok(Html(render("Links", LINKS)?))
+}
+
+pub async fn skills() -> AppResult<Html<String>> {
+    Ok(Html(render("Skills", SKILLS)?))
 }
 
 fn render(title: &'static str, body: &'static str) -> AppResult<String> {

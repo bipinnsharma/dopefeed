@@ -18,6 +18,7 @@ pub struct DirectoryPage {
     shown: i64,
     category: String,
     q: String,
+    sort: String,
     page: i64,
     has_more: bool,
 }
@@ -30,6 +31,7 @@ pub struct FeedGrid {
     shown: i64,
     category: String,
     q: String,
+    sort: String,
     page: i64,
     has_more: bool,
 }
@@ -40,6 +42,7 @@ pub struct FeedGridMore {
     feeds: Vec<Feed>,
     category: String,
     q: String,
+    sort: String,
     page: i64,
     has_more: bool,
 }
@@ -55,6 +58,7 @@ pub async fn index(
         shown: page.shown,
         category: page.category,
         q: page.q,
+        sort: page.sort,
         page: page.page,
         has_more: page.has_more,
     }
@@ -73,6 +77,7 @@ pub async fn grid(
             feeds: page.feeds,
             category: page.category,
             q: page.q,
+            sort: page.sort,
             page: page.page,
             has_more: page.has_more,
         }
@@ -84,6 +89,7 @@ pub async fn grid(
             shown: page.shown,
             category: page.category,
             q: page.q,
+            sort: page.sort,
             page: page.page,
             has_more: page.has_more,
         }
@@ -112,6 +118,12 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
         .chars()
         .take(100)
         .collect::<String>();
+    let sort = match query.sort.as_deref() {
+        Some("popular") => "popular",
+        Some("oldest") => "oldest",
+        _ => "recent",
+    }
+    .to_string();
     let page = query.page.unwrap_or(1).max(1);
 
     let mut count =
@@ -128,11 +140,16 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
          FROM feeds f WHERE f.status = 'active'",
     );
     push_filters(&mut feeds, &category, &q);
-    feeds
-        .push(
+    let order = match sort.as_str() {
+        "popular" => " ORDER BY post_count DESC, f.created_at DESC, f.id DESC LIMIT ",
+        "oldest" => " ORDER BY f.created_at ASC, f.id ASC LIMIT ",
+        _ => {
             " ORDER BY (SELECT MAX(p.published_at) FROM posts p WHERE p.feed_id = f.id) DESC,
-             f.created_at DESC, f.id DESC LIMIT ",
-        )
+             f.created_at DESC, f.id DESC LIMIT "
+        }
+    };
+    feeds
+        .push(order)
         .push_bind(PAGE_SIZE)
         .push(" OFFSET ")
         .push_bind((page - 1) * PAGE_SIZE);
@@ -144,6 +161,7 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
         shown: (page * PAGE_SIZE).min(total),
         category,
         q,
+        sort,
         page,
         has_more: page * PAGE_SIZE < total,
     })

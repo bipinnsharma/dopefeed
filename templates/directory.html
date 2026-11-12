@@ -1,47 +1,57 @@
 {% extends "base.html" %}
 {% block title %}dopefeed — Read what matters{% endblock %}
-{% block content %}
-<section class="hero">
-  <h1>Read what matters<span class="accent">.</span></h1>
-  <p class="hero-sub">A hand-picked directory of RSS, Atom and YouTube feeds. Subscribe in your browser, read without the noise.</p>
-</section>
-
-<form id="filters" class="search-form" role="search"
+{% block search %}
+<form id="filters" class="topbar-search" role="search" action="/" method="get"
       hx-get="/feeds" hx-trigger="keyup changed delay:300ms, search"
       hx-target="#feed-grid" hx-include="this">
   <input id="search-input" class="search-input" type="search" name="q" value="{{ q }}"
          placeholder="Search feeds…" aria-label="Search feeds" autocomplete="off">
   <input type="hidden" name="category" value="{{ category }}">
+  <input type="hidden" name="sort" value="{{ sort }}">
 </form>
+{% endblock %}
+{% block content %}
+<section class="directory">
+  <div class="filter-row">
+    <nav class="chips" aria-label="Categories">
+      <a class="chip{% if category == "" %} is-active{% endif %}" href="/?sort={{ sort }}" hx-get="/feeds?sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">All</a>
+      <a class="chip{% if category == "ai" %} is-active{% endif %}" href="/?category=ai&sort={{ sort }}" hx-get="/feeds?category=ai&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">AI</a>
+      <a class="chip{% if category == "ceo" %} is-active{% endif %}" href="/?category=ceo&sort={{ sort }}" hx-get="/feeds?category=ceo&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">CEO</a>
+      <a class="chip{% if category == "coding" %} is-active{% endif %}" href="/?category=coding&sort={{ sort }}" hx-get="/feeds?category=coding&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Coding</a>
+      <a class="chip{% if category == "design" %} is-active{% endif %}" href="/?category=design&sort={{ sort }}" hx-get="/feeds?category=design&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Design</a>
+      <a class="chip{% if category == "dev" %} is-active{% endif %}" href="/?category=dev&sort={{ sort }}" hx-get="/feeds?category=dev&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Dev</a>
+      <a class="chip{% if category == "lifestyle" %} is-active{% endif %}" href="/?category=lifestyle&sort={{ sort }}" hx-get="/feeds?category=lifestyle&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Lifestyle</a>
+      <a class="chip{% if category == "product" %} is-active{% endif %}" href="/?category=product&sort={{ sort }}" hx-get="/feeds?category=product&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Product</a>
+      <a class="chip{% if category == "startup" %} is-active{% endif %}" href="/?category=startup&sort={{ sort }}" hx-get="/feeds?category=startup&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Startups</a>
+      <a class="chip{% if category == "tech" %} is-active{% endif %}" href="/?category=tech&sort={{ sort }}" hx-get="/feeds?category=tech&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Tech</a>
+      <a class="chip{% if category == "writing" %} is-active{% endif %}" href="/?category=writing&sort={{ sort }}" hx-get="/feeds?category=writing&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">Writing</a>
+      <a class="chip{% if category == "youtube" %} is-active{% endif %}" href="/?category=youtube&sort={{ sort }}" hx-get="/feeds?category=youtube&sort={{ sort }}"
+         hx-target="#feed-grid" hx-include="#search-input">YouTube</a>
+    </nav>
+    <form class="sort-form" method="get" action="/">
+      <input type="hidden" name="category" value="{{ category }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <select class="sort-select" name="sort" data-autosubmit aria-label="Sort feeds">
+        <option value="recent"{% if sort == "recent" %} selected{% endif %}>Recent</option>
+        <option value="popular"{% if sort == "popular" %} selected{% endif %}>Popular</option>
+        <option value="oldest"{% if sort == "oldest" %} selected{% endif %}>Oldest</option>
+      </select>
+    </form>
+  </div>
 
-<nav class="chips" aria-label="Categories">
-  <a class="chip{% if category == "" %} is-active{% endif %}" href="/" hx-get="/feeds"
-     hx-target="#feed-grid" hx-include="#search-input">ALL</a>
-  <a class="chip{% if category == "ai" %} is-active{% endif %}" href="/?category=ai" hx-get="/feeds?category=ai"
-     hx-target="#feed-grid" hx-include="#search-input">AI</a>
-  <a class="chip{% if category == "ceo" %} is-active{% endif %}" href="/?category=ceo" hx-get="/feeds?category=ceo"
-     hx-target="#feed-grid" hx-include="#search-input">CEO</a>
-  <a class="chip{% if category == "coding" %} is-active{% endif %}" href="/?category=coding" hx-get="/feeds?category=coding"
-     hx-target="#feed-grid" hx-include="#search-input">CODING</a>
-  <a class="chip{% if category == "design" %} is-active{% endif %}" href="/?category=design" hx-get="/feeds?category=design"
-     hx-target="#feed-grid" hx-include="#search-input">DESIGN</a>
-  <a class="chip{% if category == "dev" %} is-active{% endif %}" href="/?category=dev" hx-get="/feeds?category=dev"
-     hx-target="#feed-grid" hx-include="#search-input">DEV</a>
-  <a class="chip{% if category == "lifestyle" %} is-active{% endif %}" href="/?category=lifestyle" hx-get="/feeds?category=lifestyle"
-     hx-target="#feed-grid" hx-include="#search-input">LIFESTYLE</a>
-  <a class="chip{% if category == "product" %} is-active{% endif %}" href="/?category=product" hx-get="/feeds?category=product"
-     hx-target="#feed-grid" hx-include="#search-input">PRODUCT</a>
-  <a class="chip{% if category == "startup" %} is-active{% endif %}" href="/?category=startup" hx-get="/feeds?category=startup"
-     hx-target="#feed-grid" hx-include="#search-input">STARTUP</a>
-  <a class="chip{% if category == "tech" %} is-active{% endif %}" href="/?category=tech" hx-get="/feeds?category=tech"
-     hx-target="#feed-grid" hx-include="#search-input">TECH</a>
-  <a class="chip{% if category == "writing" %} is-active{% endif %}" href="/?category=writing" hx-get="/feeds?category=writing"
-     hx-target="#feed-grid" hx-include="#search-input">WRITING</a>
-  <a class="chip{% if category == "youtube" %} is-active{% endif %}" href="/?category=youtube" hx-get="/feeds?category=youtube"
-     hx-target="#feed-grid" hx-include="#search-input">YOUTUBE</a>
-</nav>
-
-<div id="feed-grid">
-{% include "_feed_grid.html" %}
-</div>
+  <div id="feed-grid">
+  {% include "_feed_grid.html" %}
+  </div>
+</section>
 {% endblock %}
