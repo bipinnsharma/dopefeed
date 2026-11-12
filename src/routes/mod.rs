@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod directory;
 pub mod my;
 pub mod reader;
@@ -11,13 +12,20 @@ use axum::{
     http::{HeaderValue, Request, header},
     middleware::{self, Next},
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use tower_http::{compression::CompressionLayer, services::ServeDir, trace::TraceLayer};
 
 pub fn router(state: AppState) -> Router {
+    let admin_routes = Router::new()
+        .route("/admin", get(admin::page))
+        .route("/admin/feeds", post(admin::create))
+        .route("/admin/feeds/{id}/delete", post(admin::delete))
+        .route_layer(middleware::from_fn_with_state(state.clone(), admin::auth));
+
     Router::new()
         .route("/", get(directory::index))
+        .merge(admin_routes)
         .route("/feeds", get(directory::grid))
         .route("/f/{id}", get(reader::detail))
         .route("/read/{id}", get(reader::read))

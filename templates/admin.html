@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Admin — dopefeed{% endblock %}
+{% block content %}
+<section class="admin">
+  <h1 class="page-title">Admin</h1>
+  <p class="meta admin-sub">Add or remove feeds. Changes are live immediately.</p>
+  {% if let Some(flash) = flash %}<div class="flash">{{ flash }}</div>{% endif %}
+  {% if let Some(error) = error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+
+  <form class="submit-form admin-form" method="post" action="/admin/feeds">
+    <label class="field">
+      <span class="field-label">Feed or site URL</span>
+      <input class="input" name="url" value="{{ url }}" required maxlength="2048"
+             placeholder="https://example.com/feed">
+    </label>
+    <label class="field">
+      <span class="field-label">Category</span>
+      <select class="input" name="category">
+        {% for category in categories %}<option value="{{ category.name }}"{% if category.selected %} selected{% endif %}>{{ category.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">Title (optional)</span>
+      <input class="input" name="title" value="{{ title }}" maxlength="200">
+    </label>
+    <button class="button" type="submit">Add feed</button>
+  </form>
+
+  <h2 class="admin-heading">Feeds ({{ feeds.len() }})</h2>
+  <div class="admin-list">
+  {% for feed in feeds %}
+    <div class="admin-row">
+      <div class="admin-main">
+        <a class="admin-title" href="/f/{{ feed.id }}">{{ feed.title }}</a>
+        <p class="meta">{{ feed.domain }} • {{ feed.category }} · {{ feed.post_count }} posts • {{ feed.status }}{% if let Some(error) = feed.last_error %} · {{ error }}{% endif %}</p>
+      </div>
+      <form method="post" action="/admin/feeds/{{ feed.id }}/delete"
+            data-confirm="Delete {{ feed.title }} and all its posts?">
+        <button class="button-secondary admin-delete" type="submit">Delete</button>
+      </form>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

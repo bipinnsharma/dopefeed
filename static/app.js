@@ -55,6 +55,14 @@
     save(READ, read.slice(-CAP));
   }
 
+  document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      if (!window.confirm(form.dataset.confirm)) {
+        event.preventDefault();
+      }
+    });
+  });
+
   var timeline = document.getElementById("timeline");
   if (timeline) {
     if (subs.length === 0) {

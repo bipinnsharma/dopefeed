@@ -24,7 +24,6 @@ pub struct DueFeed {
     pub fetch_interval_secs: i64,
     pub error_count: i64,
     pub domain: String,
-    pub post_count: i64,
 }
 
 pub fn http_client(base_url: &str) -> anyhow::Result<Client> {
@@ -101,17 +100,16 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A 0-post row may be a seed placeholder pointing at a site page. Retry
-/// discovery before backing off, then switch the row to the real feed URL.
+/// A row may be a placeholder (site page instead of a feed) or an HTML/sitemap
+/// synthetic feed. Retry discovery on parse failure, even when posts already
+/// exist, then switch the row to whatever discovery resolved.
 async fn retry_discovery(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
-    if feed.post_count > 0 {
-        return record_failure(state, feed, "Could not parse feed").await;
-    }
     let url = Url::parse(&feed.url).map_err(|e| anyhow!("bad feed url: {e}"))?;
     match discover::resolve(&state.http, &url).await {
         Ok(resolved) => {
             sqlx::query(
-                "UPDATE feeds SET url = ?, site_url = ?, description = COALESCE(?, description)
+                "UPDATE feeds SET url = ?, site_url = ?, description = COALESCE(?, description),
+                 etag = NULL, last_modified = NULL
                  WHERE id = ?",
             )
             .bind(&resolved.feed_url)
@@ -132,18 +130,9 @@ async fn retry_discovery(state: &AppState, feed: &DueFeed) -> anyhow::Result<()>
                 .await?;
             }
             let new = ingest(&state.pool, feed.id, &resolved.feed, &resolved.site_url).await?;
-            let mut headers = HeaderMap::new();
-            if let Some(etag) = &resolved.etag
-                && let Ok(value) = HeaderValue::from_str(etag)
-            {
-                headers.insert(ETAG, value);
-            }
-            if let Some(modified) = &resolved.last_modified
-                && let Ok(value) = HeaderValue::from_str(modified)
-            {
-                headers.insert(LAST_MODIFIED, value);
-            }
-            succeed(state, feed, new, &headers).await
+            // Never cache ETag/Last-Modified here: for a synthetic feed they
+            // describe the page and would turn the next refresh into a 304.
+            succeed(state, feed, new, &HeaderMap::new()).await
         }
         Err(error) => record_failure(state, feed, &error).await,
     }
@@ -183,9 +172,8 @@ async fn succeed(
         .map_err(|_| anyhow!("zero streak lock poisoned"))?
         .insert(feed.id, streak);
 
-    let etag = ssrf::header_value(headers, ETAG).or_else(|| feed.etag.clone());
-    let last_modified =
-        ssrf::header_value(headers, LAST_MODIFIED).or_else(|| feed.last_modified.clone());
+    let etag = ssrf::header_value(headers, ETAG);
+    let last_modified = ssrf::header_value(headers, LAST_MODIFIED);
 
     sqlx::query(
         "UPDATE feeds SET etag = ?, last_modified = ?, last_fetched_at = ?,

@@ -41,6 +41,7 @@ fn test_config(base_url: &str) -> Config {
         base_url: base_url.parse().unwrap(),
         database_url: "sqlite::memory:".into(),
         fetch_concurrency: 2,
+        admin_key: None,
     }
 }
 
@@ -50,11 +51,17 @@ async fn test_state() -> AppState {
 
 /// Binds first so the submitted Origin matches the app's BASE_URL.
 async fn spawn_app() -> (String, AppState) {
+    spawn_app_with_key(None).await
+}
+
+async fn spawn_app_with_key(key: Option<&str>) -> (String, AppState) {
     let pool = test_pool().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let base = format!("http://{addr}");
-    let state = AppState::new(pool, test_config(&base)).unwrap();
+    let mut config = test_config(&base);
+    config.admin_key = key.map(str::to_string);
+    let state = AppState::new(pool, config).unwrap();
     let app = routes::router(state.clone());
     tokio::spawn(async move {
         axum::serve(
@@ -172,7 +179,6 @@ async fn refresh_handles_304_as_success() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
-        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
     assert_eq!(post_count(&state.pool, id).await, 0);
@@ -209,7 +215,6 @@ async fn refresh_success_adapts_interval() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
-        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -223,6 +228,50 @@ async fn refresh_success_adapts_interval() {
     assert_eq!(interval, 1800, ">=3 new posts halves the interval");
     assert_eq!(errors, 0);
     assert_eq!(etag.as_deref(), Some("\"v1\""));
+}
+
+#[tokio::test]
+async fn refresh_rediscovers_html_feed_with_existing_posts() {
+    let server = MockServer::start().await;
+    let page = r#"<html><head><title>My Blog</title></head><body>
+        <a href="/posts/one">First post title</a>
+        <a href="/posts/two">Second post title</a>
+        <a href="/posts/three">Third post title</a>
+    </body></html>"#;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .mount(&server)
+        .await;
+    let state = test_state().await;
+    let url = format!("{}/", server.uri());
+    let id = add_feed(&state.pool, &url, "active").await;
+    add_post(
+        &state.pool,
+        id,
+        "https://example.com/old",
+        "Old post",
+        "2025-01-01 00:00:00",
+    )
+    .await;
+    let due = DueFeed {
+        id,
+        url: url.clone(),
+        site_url: server.uri(),
+        etag: Some("\"page-etag\"".into()),
+        last_modified: None,
+        fetch_interval_secs: 3600,
+        error_count: 0,
+        domain: "127.0.0.1".into(),
+    };
+    fetch::refresh(&state, &due).await.unwrap();
+
+    assert_eq!(post_count(&state.pool, id).await, 4);
+    let etag: Option<String> = sqlx::query_scalar("SELECT etag FROM feeds WHERE id = ?")
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert!(etag.is_none(), "synthetic feeds must not cache page ETags");
 }
 
 #[tokio::test]
@@ -244,7 +293,6 @@ async fn refresh_failure_backs_off() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
-        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -285,7 +333,6 @@ async fn refresh_rejects_oversized_body() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
-        post_count: 0,
     };
     fetch::refresh(&state, &due).await.unwrap();
     let last_error: Option<String> =
@@ -598,6 +645,66 @@ async fn submit_blocks_redirect_to_private() {
         .await
         .unwrap();
     assert_eq!(count, 0);
+}
+
+#[test]
+fn admin_key_requires_six_mixed_chars() {
+    use crate::config::valid_admin_key;
+    assert!(valid_admin_key("ab12cd"));
+    assert!(valid_admin_key("A1b2C3"));
+    assert!(!valid_admin_key("abcdef"));
+    assert!(!valid_admin_key("123456"));
+    assert!(!valid_admin_key("abc12"));
+    assert!(!valid_admin_key("abc1234"));
+    assert!(!valid_admin_key("abc-12"));
+}
+
+#[tokio::test]
+async fn admin_requires_basic_auth() {
+    let (base, _state) = spawn_app_with_key(Some("ab12cd")).await;
+    let client = Client::new();
+    let denied = client.get(format!("{base}/admin")).send().await.unwrap();
+    assert_eq!(denied.status(), 401);
+    let ok = client
+        .get(format!("{base}/admin"))
+        .basic_auth("admin", Some("ab12cd"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200);
+}
+
+#[tokio::test]
+async fn admin_is_disabled_without_key() {
+    let (base, _state) = spawn_app().await;
+    let response = Client::new()
+        .get(format!("{base}/admin"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+}
+
+#[tokio::test]
+async fn admin_delete_removes_feed_and_posts() {
+    let (base, state) = spawn_app_with_key(Some("ab12cd")).await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    add_post(&state.pool, id, "guid", "A post", "2025-01-01 00:00:00").await;
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
+    let response = client
+        .post(format!("{base}/admin/feeds/{id}/delete"))
+        .header(ORIGIN, &base)
+        .basic_auth("admin", Some("ab12cd"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 303);
+    assert_eq!(post_count(&state.pool, id).await, 0);
+    let feeds: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feeds")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(feeds, 0);
 }
 
 #[test]

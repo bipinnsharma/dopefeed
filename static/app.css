@@ -500,6 +500,36 @@ img { max-width: 100%; }
 .submit-form .button { margin-top: var(--space-8); }
 .submit-form .meta { margin-top: var(--space-12); }
 
+/* Admin */
+.admin { max-width: 880px; padding-block: var(--space-32) var(--space-48); }
+.admin-sub { margin-bottom: var(--space-24); }
+.admin-form { margin-bottom: var(--space-32); }
+.admin-heading {
+  margin: var(--space-8) 0 var(--space-12);
+  font-size: var(--font-size-18);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--tracking-tight);
+}
+.admin-list { border-top: 1px solid var(--color-border); }
+.admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding-block: var(--space-12);
+  border-bottom: 1px solid var(--color-border);
+}
+.admin-main { min-width: 0; }
+.admin-title {
+  display: inline-block;
+  font-size: var(--font-size-16);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-snug);
+}
+.admin-title:hover { color: var(--color-accent); }
+.admin-row .meta { overflow-wrap: anywhere; }
+.admin-delete { color: var(--color-danger-ink); }
+
 /* Static pages */
 .static-page { max-width: 680px; padding-block: var(--space-32); }
 .empty-page { padding-block: var(--space-48); }

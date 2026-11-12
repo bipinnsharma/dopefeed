@@ -17,6 +17,9 @@ pub struct Resolved {
     pub feed: feed_rs::model::Feed,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    /// True when the feed was synthesized from HTML/sitemap rather than parsed
+    /// as RSS/Atom. Its ETag is for the page, so it must not be stored.
+    pub synthetic: bool,
 }
 
 /// Turns a feed URL, a site URL, or a YouTube channel URL into a parsed feed.
@@ -34,7 +37,13 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
     }
 
     if let Some(feed) = parse_feed(&fetched.body) {
-        return Ok(build(fetched.final_url, feed, fetched.headers, input));
+        return Ok(build(
+            fetched.final_url,
+            feed,
+            fetched.headers,
+            input,
+            false,
+        ));
     }
 
     if let Ok(html) = std::str::from_utf8(&fetched.body) {
@@ -43,7 +52,7 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
                 continue;
             };
             if let Some(feed) = parse_feed(&next.body) {
-                return Ok(build(next.final_url, feed, next.headers, input));
+                return Ok(build(next.final_url, feed, next.headers, input, false));
             }
         }
         if let Some(feed) = html_feed(html, &fetched.final_url) {
@@ -52,6 +61,7 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
                 feed,
                 fetched.headers,
                 input,
+                true,
             ));
         }
     }
@@ -61,6 +71,7 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
             feed,
             fetched.headers,
             input,
+            true,
         ));
     }
 
@@ -307,7 +318,13 @@ async fn resolve_youtube(client: &Client, input: &Url) -> Result<Resolved, Strin
         let fetched = ssrf::get(client, &url, &HeaderMap::new()).await?;
         if fetched.status.is_success() {
             if let Some(feed) = parse_feed(&fetched.body) {
-                return Ok(build(fetched.final_url, feed, fetched.headers, input));
+                return Ok(build(
+                    fetched.final_url,
+                    feed,
+                    fetched.headers,
+                    input,
+                    false,
+                ));
             }
         } else {
             last_status = Some(fetched.status);
@@ -471,7 +488,13 @@ fn empty_close(body: &[u8], after: usize, name: &[u8]) -> Option<usize> {
     Some(after + 2 + name.len() + 1)
 }
 
-fn build(feed_url: Url, feed: feed_rs::model::Feed, headers: HeaderMap, input: &Url) -> Resolved {
+fn build(
+    feed_url: Url,
+    feed: feed_rs::model::Feed,
+    headers: HeaderMap,
+    input: &Url,
+    synthetic: bool,
+) -> Resolved {
     let site_url = feed
         .entries
         .iter()
@@ -500,6 +523,7 @@ fn build(feed_url: Url, feed: feed_rs::model::Feed, headers: HeaderMap, input: &
         feed,
         etag: ssrf::header_value(&headers, ETAG),
         last_modified: ssrf::header_value(&headers, LAST_MODIFIED),
+        synthetic,
     }
 }
 

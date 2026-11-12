@@ -32,12 +32,12 @@ struct SubmitPage {
     categories: Vec<CategoryOption>,
 }
 
-struct CategoryOption {
-    name: &'static str,
-    selected: bool,
+pub(crate) struct CategoryOption {
+    pub(crate) name: &'static str,
+    pub(crate) selected: bool,
 }
 
-fn category_options(selected: &str) -> Vec<CategoryOption> {
+pub(crate) fn category_options(selected: &str) -> Vec<CategoryOption> {
     CATEGORIES
         .iter()
         .map(|name| CategoryOption {
@@ -49,9 +49,9 @@ fn category_options(selected: &str) -> Vec<CategoryOption> {
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitForm {
-    url: String,
-    category: String,
-    title: Option<String>,
+    pub url: String,
+    pub category: String,
+    pub title: Option<String>,
 }
 
 pub async fn form() -> AppResult<Html<String>> {
@@ -130,7 +130,7 @@ fn invalid(form: &SubmitForm, category: &str, title: &str, error: &str) -> Respo
     }
 }
 
-fn parse_input(raw: &str) -> Option<Url> {
+pub(crate) fn parse_input(raw: &str) -> Option<Url> {
     let raw = raw.trim();
     if raw.is_empty() || raw.len() > 2048 {
         return None;
@@ -158,7 +158,7 @@ fn check_rate_limit(state: &AppState, ip: IpAddr) -> AppResult<()> {
     Ok(())
 }
 
-fn origin_allowed(headers: &HeaderMap, base: &Url) -> bool {
+pub(crate) fn origin_allowed(headers: &HeaderMap, base: &Url) -> bool {
     let source = headers
         .get(header::ORIGIN)
         .or_else(|| headers.get(header::REFERER))
@@ -192,6 +192,13 @@ pub async fn insert_resolved(
         .map(str::to_string)
         .or_else(|| resolved.title.clone())
         .unwrap_or_else(|| domain.clone());
+    // A synthetic feed's ETag belongs to the page, not a feed; storing it would
+    // make the next refresh a 304 and skip discovery.
+    let (etag, last_modified) = if resolved.synthetic {
+        (None, None)
+    } else {
+        (resolved.etag.clone(), resolved.last_modified.clone())
+    };
 
     let result = sqlx::query(
         "INSERT INTO feeds (url, site_url, domain, title, description, category, status,
@@ -204,8 +211,8 @@ pub async fn insert_resolved(
     .bind(&title)
     .bind(resolved.description.clone())
     .bind(category)
-    .bind(resolved.etag.clone())
-    .bind(resolved.last_modified.clone())
+    .bind(etag)
+    .bind(last_modified)
     .execute(&state.pool)
     .await?;
     let id = result.last_insert_rowid();

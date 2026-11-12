@@ -37,6 +37,7 @@ retrying.
 | `DATABASE_URL` | `sqlite://data/dopefeed.db?mode=rwc` | SQLite URL |
 | `RUST_LOG` | `info` | Tracing filter |
 | `FETCH_CONCURRENCY` | `8` | Parallel feed fetches |
+| `ADMIN_KEY` | unset (admin off) | Six letters/numbers with at least one of each; Basic-auth password for `/admin` |
 
 ## Routes
 
@@ -46,6 +47,7 @@ retrying.
 - `/read/{id}` reader (sanitized HTML)
 - `/my` local timeline shell (fed by `/api/timeline`)
 - `/submit` add a feed (validated, auto-approved)
+- `/admin` add/delete feeds (HTTP Basic, password = `ADMIN_KEY`)
 - `/about`, `/terms`, `/privacy`, `/healthz`
 
 ## Frontend

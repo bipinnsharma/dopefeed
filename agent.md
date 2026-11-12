@@ -116,10 +116,15 @@ Chips: ALL AI CEO CODING DESIGN DEV LIFESTYLE PRODUCT STARTUP TECH WRITING YOUTU
 | GET | /api/timeline | htmx `_post_list.html`; `feeds=1,2,3` (≤50 int ids, active feeds only; invalid → 400), `page` (50/page) |
 | GET | /submit | Submission form |
 | POST | /submit | Validate → discover → insert status=active → fetch now (§9) |
+| GET | /admin | Admin: submit form + all feeds + delete buttons |
+| POST | /admin/feeds | Admin add (same discovery/validation as /submit) |
+| POST | /admin/feeds/{id}/delete | Admin delete feed (posts cascade) |
 | GET | /about /terms /privacy | Static pages |
 | GET | /healthz | 200, checks `SELECT 1` |
 Unknown ids → 404 error page. POST /submit requires Origin/Referer host ==
-BASE_URL host, else 403. No other mutations exist.
+BASE_URL host, else 403. Admin routes additionally require HTTP Basic with
+`ADMIN_KEY` as the password; when unset they return 404. Admin POSTs use the
+same Origin check. No other mutations exist.
 
 ### 6a. Dynamic SQL (pinned · security)
 No user input ever enters the SQL *shape*. Use `sqlx::QueryBuilder` and bind every
@@ -196,7 +201,11 @@ Tick 60s: select ≤50 active feeds with `next_fetch_at <= now`, oldest first.
 Semaphore = FETCH_CONCURRENCY. Politeness: never 2 in-flight per domain; ≥2s
 between same-domain fetches (in-memory map). reqwest: 90s timeout, UA
 `dopefeed/1.0 (+{BASE_URL})`, conditional GET (stored ETag/Last-Modified), ≤5
-redirects, 10MB body cap. 304 → success, skip parse. Parse feed-rs; per entry:
+redirects, 10MB body cap. 304 → success, skip parse. Synthetic HTML/sitemap
+feeds never store ETag/Last-Modified (they describe the page, not a feed), so
+every due tick re-runs discovery and ingests new links. A real feed whose body
+no longer parses also retries discovery, so moved or HTML-only URLs self-heal.
+Parse feed-rs; per entry:
 guid = id else link else sha256(title+link) [sha2]; skip if no title AND link;
 published = published else updated else now; content = body else summary else "";
 ammonia-sanitize (strip script/style/form/iframe); summary = 300 chars de-tagged.
@@ -284,7 +293,7 @@ M0 Skeleton: config/error/db/router//healthz/tracing/graceful shutdown/.env.exam
    ✅ cargo run serves /healthz 200; DB created; checks clean.
 M1 Schema+seed+models. ✅ seed twice → no dupes; directory query returns counts.
 M2 Worker + fixtures (rss2/atom/youtube/malformed) via wiremock.
-   ✅ dedup on refetch; 304 skip; backoff math; 2MB cap; sanitizer strips script.
+   ✅ dedup on refetch; 304 skip; backoff math; 10MB cap; sanitizer strips script.
 M3 Design system + public UI: Appendix A → static/tokens.css verbatim; app.css
    per §7; fonts: download InterVariable.woff2 (rsms/inter releases) +
    DepartureMono-Regular.woff2 (departuremono.com) into static/fonts/ and enable

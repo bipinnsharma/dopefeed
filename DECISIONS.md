@@ -40,6 +40,10 @@ Short log of choices that were not fully pinned down by `agent.md`.
   favicon panel. A post whose feed carried only a link/summary has no body, so
   `/read/{id}` renders an in-page "summary only" card that links to the source
   instead of an empty article.
+- **Admin** — optional `ADMIN_KEY` (exactly 6 alphanumeric chars, ≥1 letter and
+  ≥1 digit). HTTP Basic password, no session/cookie: constant-time compare,
+  10 failed attempts per IP per 5 minutes → 429, 404 when the key is unset.
+  Delete cascades posts via the existing foreign key.
 - **HTML-only sites** — when no RSS exists, discovery first synthesizes
   an Atom feed from same-site article links on the page, then from
   `/sitemap.xml`/`/sitemap_index.xml` (following child sitemaps). Entry titles

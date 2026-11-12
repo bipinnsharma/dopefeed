@@ -15,6 +15,8 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// In-memory submission rate limit: IP -> attempt timestamps.
     pub submissions: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
+    /// In-memory failed admin-key attempts: IP -> attempt timestamps.
+    pub admin_attempts: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
     /// Per-domain last fetch instant for the worker's politeness rule.
     pub domains: Arc<Mutex<HashMap<String, Instant>>>,
     /// Consecutive zero-new-post fetches per feed (adaptive interval).
@@ -31,6 +33,7 @@ impl AppState {
             config: Arc::new(config),
             http,
             submissions: Arc::new(Mutex::new(HashMap::new())),
+            admin_attempts: Arc::new(Mutex::new(HashMap::new())),
             domains: Arc::new(Mutex::new(HashMap::new())),
             zero_streak: Arc::new(Mutex::new(HashMap::new())),
             fetch_slots,
