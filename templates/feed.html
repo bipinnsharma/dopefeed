@@ -8,7 +8,7 @@
     <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"
             aria-label="Subscribe to {{ feed.title }}" title="Subscribe">+</button>
   </div>
-  <p class="meta">{{ feed.domain }} • {{ feed.category }} · {{ feed.post_count }} posts{% if let Some(label) = feed.fetched_label %} · updated {{ label }}{% endif %}</p>
+  <p class="meta">{{ feed.domain }} • {{ feed.category }} · {{ feed.post_count }} posts{% if let Some(label) = feed.latest_label %} · updated {{ label }}{% endif %}</p>
   {% if let Some(description) = feed.description %}<p class="feed-desc">{{ description }}</p>{% endif %}
 </header>
 <div class="post-list">

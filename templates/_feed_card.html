@@ -1,12 +1,14 @@
 <article class="feed-card">
   <div class="feed-card-head">
+    <img class="feed-icon" src="https://www.google.com/s2/favicons?domain={{ feed.domain }}&amp;sz=64"
+         alt="" width="20" height="20" loading="lazy">
     <h2 class="feed-card-title"><a href="/f/{{ feed.id }}">{{ feed.title }}</a></h2>
     <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"
             aria-label="Subscribe to {{ feed.title }}" title="Subscribe">+</button>
   </div>
   {% if let Some(description) = feed.description %}<p class="feed-card-desc">{{ description }}</p>{% endif %}
   <p class="meta feed-card-meta">
-    {{ feed.domain }} • {{ feed.category }} · {{ feed.post_count }} posts
+    {{ feed.domain }} • {{ feed.category }} · {{ feed.post_count }} posts{% if let Some(label) = feed.latest_label %} · updated {{ label }}{% endif %}
     {% if feed.is_new() %}<span class="new-pill">new post</span>{% endif %}
   </p>
 </article>

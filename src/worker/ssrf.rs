@@ -9,7 +9,7 @@ use std::{
 };
 use url::Url;
 
-pub const MAX_BODY: usize = 2 * 1024 * 1024;
+pub const MAX_BODY: usize = 10 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 
 /// Validating resolver: the addresses reqwest actually connects to are the ones

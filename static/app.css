@@ -162,7 +162,16 @@ img { max-width: 100%; }
   justify-content: space-between;
   gap: var(--space-12);
 }
+.feed-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-4);
+  background: var(--color-surface-subtle);
+}
 .feed-card-title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: var(--font-size-16);
   font-weight: var(--font-weight-medium);

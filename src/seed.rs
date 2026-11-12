@@ -36,7 +36,7 @@ const SEED: &[(&str, &str, &str)] = &[
         "design",
         "https://www.chrbutler.com/feed.rss",
     ),
-    ("Derek Sivers", "writing", "https://sive.rs/feed.xml"),
+    ("Derek Sivers", "writing", "https://sive.rs/feed"),
     (
         "Every Inc",
         "youtube",
@@ -55,7 +55,7 @@ const SEED: &[(&str, &str, &str)] = &[
     (
         "Source Code",
         "startup",
-        "https://every.to/source-code/feed.xml",
+        "https://every.to/source-code/feed",
     ),
     ("CSS-Tricks", "coding", "https://css-tricks.com/feed/"),
     ("exe.dev", "coding", "https://blog.exe.dev/atom.xml"),
@@ -79,8 +79,8 @@ const SEED: &[(&str, &str, &str)] = &[
         "startup",
         "https://newsletter.pragmaticengineer.com/feed",
     ),
-    ("Dingyi", "writing", "discover:https://quaily.com/dingyi"),
-    ("Linear", "product", "discover:https://linear.app"),
+    ("Dingyi", "writing", "https://quaily.com/dingyi/feed/atom"),
+    ("Linear", "product", "https://linear.app/rss/now.xml"),
     ("Karl Koch", "design", "https://karlkoch.me/rss.xml"),
     (
         "Dive Club",
@@ -227,7 +227,7 @@ const SEED: &[(&str, &str, &str)] = &[
     ("Figmalion", "design", "https://figmalion.com/feed.atom"),
     ("DHH", "ceo", "https://world.hey.com/dhh/feed.atom"),
     ("OneV's Den", "coding", "https://onevcat.com/feed.xml"),
-    ("Shu Ding", "coding", "discover:https://shud.in"),
+    ("Shu Ding", "coding", "discover:https://shud.in/thoughts"),
     ("ADPList", "design", "https://adplist.substack.com/feed"),
     (
         "Josh Comeau",
@@ -263,7 +263,7 @@ const SEED: &[(&str, &str, &str)] = &[
         "youtube",
         "discover:https://www.youtube.com/@founderspodcast1",
     ),
-    ("Matt Shumer", "ai", "discover:https://shumer.dev"),
+    ("Matt Shumer", "ai", "discover:https://shumer.dev/blog"),
     (
         "os.rocorgi.wang",
         "coding",
@@ -324,7 +324,11 @@ const SEED: &[(&str, &str, &str)] = &[
         "coding",
         "https://blog.alaindichiappari.dev/feed",
     ),
-    ("Brian Lovin", "design", "discover:https://brianlovin.com"),
+    (
+        "Brian Lovin",
+        "design",
+        "https://brianlovin.com/writing/rss.xml",
+    ),
     (
         "David Hoang",
         "design",
@@ -347,12 +351,12 @@ const SEED: &[(&str, &str, &str)] = &[
         "https://margaretstorey.com/feed",
     ),
     ("PJ Onori's blog", "design", "https://pjonori.blog/rss.xml"),
-    ("Design Forces", "design", "discover:https://df.fenx.work"),
+    ("Design Forces", "design", "https://df.fenx.work/rss/design"),
     ("@kentgigger", "coding", "https://kentgigger.com/rss.xml"),
     (
         "panzhixiang.cn",
         "coding",
-        "discover:https://panzhixiang.cn",
+        "https://panzhixiang.cn/atom.xml",
     ),
     ("Mario Zechner", "coding", "https://mariozechner.at/rss.xml"),
     ("/dev/michael", "coding", "https://michaellivs.com/rss.xml"),
@@ -394,7 +398,7 @@ const SEED: &[(&str, &str, &str)] = &[
         "design",
         "https://cianfrani.dev/rss.xml",
     ),
-    ("Not Boring", "design", "discover:https://notbor.ing"),
+    ("Not Boring", "design", "https://notbor.ing/words/rss.xml"),
     (
         "Helen Min",
         "design",
@@ -412,12 +416,16 @@ const SEED: &[(&str, &str, &str)] = &[
     (
         "The Quiet Engineer",
         "coding",
-        "discover:https://www.quiet.engineer",
+        "https://www.quiet.engineer/feed.xml",
     ),
     ("Kailash Nadh", "coding", "https://nadh.in/index.xml"),
     ("Ralph Ammer", "design", "https://ralphammer.com/feed/"),
     ("Yann-Edern Gillet", "design", "https://yannglt.com/rss.xml"),
-    ("Karl Lorey", "coding", "discover:https://karllorey.com"),
+    (
+        "Karl Lorey",
+        "coding",
+        "discover:https://karllorey.com/blog",
+    ),
     ("Jacky Zhao", "coding", "https://jzhao.xyz/index.xml"),
     ("Alex Harri", "coding", "https://alexharri.com/rss.xml"),
     ("Dan Eden", "design", "https://daneden.me/feed.xml"),
@@ -426,7 +434,7 @@ const SEED: &[(&str, &str, &str)] = &[
         "coding",
         "https://www.chrisgregori.dev/rss.xml",
     ),
-    ("z1han", "coding", "discover:https://z1han.com"),
+    ("z1han", "coding", "https://z1han.com/blog/rss.xml"),
     ("Dan Wang", "startup", "discover:https://danwang.co"),
     ("Artifact", "design", "https://www.readartifact.com/feed"),
     ("Steph Ango", "ceo", "https://stephango.com/feed.xml"),
@@ -435,12 +443,12 @@ const SEED: &[(&str, &str, &str)] = &[
         "design",
         "discover:https://charliedeets.com",
     ),
-    ("Benja.dev", "coding", "discover:https://benja.dev"),
+    ("Benja.dev", "coding", "discover:https://benja.dev/writing"),
     ("Reid Hoffman", "ceo", "https://www.reidhoffman.org/feed/"),
     (
         "Superorganizers",
         "lifestyle",
-        "https://every.to/superorganizers/feed.xml",
+        "https://every.to/superorganizers/feed",
     ),
     ("Huozhi", "coding", "discover:https://huozhi.im"),
     ("Guillermo Rauch", "ceo", "https://rauchg.com/atom"),
@@ -461,6 +469,7 @@ const SEED: &[(&str, &str, &str)] = &[
         "https://runninginproduction.com/podcast/feed.xml",
     ),
     ("Jeff Huang", "ai", "https://jeffhuang.com/feed.xml"),
+    ("Emil Kowalski", "design", "discover:https://emilkowal.ski/"),
 ];
 
 pub async fn run(pool: SqlitePool, config: Config) -> anyhow::Result<()> {

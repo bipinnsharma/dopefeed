@@ -653,6 +653,40 @@ async fn seed_placeholder_keeps_real_url_and_error() {
 }
 
 #[test]
+fn sitemap_locs_reads_urlset_and_index() {
+    let index = r#"<sitemapindex><sitemap><loc>https://a.example/post-sitemap.xml</loc></sitemap></sitemapindex>"#;
+    assert_eq!(
+        crate::worker::discover::sitemap_locs(index),
+        vec!["https://a.example/post-sitemap.xml"]
+    );
+    let urlset = r#"<urlset><url><loc> https://a.example/one </loc></url></urlset>"#;
+    assert_eq!(
+        crate::worker::discover::sitemap_locs(urlset),
+        vec!["https://a.example/one"]
+    );
+}
+
+#[test]
+fn html_feed_extracts_article_links() {
+    let html = r#"<html><head><title>My Blog</title></head><body>
+        <a href="/about">About me</a>
+        <a href="/post/one">First post</a>
+        <a href="/post/two">Second post</a>
+        <a href="/post/three">Third post</a>
+        <a href="https://other.example/post/x">Elsewhere</a>
+    </body></html>"#;
+    let base = url::Url::parse("https://example.com/").unwrap();
+    let feed = crate::worker::discover::html_feed(html, &base).unwrap();
+    assert_eq!(feed.entries.len(), 3);
+    assert_eq!(feed.title.unwrap().content, "My Blog");
+    assert!(
+        feed.entries
+            .iter()
+            .any(|entry| entry.title.as_ref().unwrap().content == "Second post")
+    );
+}
+
+#[test]
 fn youtube_guid_extracts_embed_id() {
     let post = Post {
         id: 1,

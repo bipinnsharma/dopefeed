@@ -46,9 +46,251 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
                 return Ok(build(next.final_url, feed, next.headers, input));
             }
         }
+        if let Some(feed) = html_feed(html, &fetched.final_url) {
+            return Ok(build(
+                fetched.final_url.clone(),
+                feed,
+                fetched.headers,
+                input,
+            ));
+        }
+    }
+    if let Some(feed) = sitemap_feed(client, &fetched.final_url).await {
+        return Ok(build(
+            fetched.final_url.clone(),
+            feed,
+            fetched.headers,
+            input,
+        ));
     }
 
     Err("Could not find a feed at that URL. Try the feed link or a YouTube channel.".into())
+}
+
+/// Many personal sites list their posts in HTML but publish no RSS. Build a
+/// synthetic Atom feed from the largest group of same-site article links.
+pub(crate) fn html_feed(html: &str, base: &Url) -> Option<feed_rs::model::Feed> {
+    use std::collections::HashMap;
+
+    let document = Html::parse_document(html);
+    let selector = Selector::parse("a[href]").ok()?;
+    let mut by_prefix: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for element in document.select(&selector) {
+        let Some(href) = element.value().attr("href") else {
+            continue;
+        };
+        if href.starts_with('#')
+            || href.starts_with('?')
+            || href.starts_with("mailto:")
+            || href.starts_with("javascript:")
+        {
+            continue;
+        }
+        let Ok(url) = base.join(href) else {
+            continue;
+        };
+        if url.host_str() != base.host_str() || !matches!(url.scheme(), "http" | "https") {
+            continue;
+        }
+        let Some(mut segments) = url.path_segments() else {
+            continue;
+        };
+        let Some(section) = segments.next() else {
+            continue;
+        };
+        if segments.next().is_none() || ignored_section(section) {
+            continue;
+        }
+        let title = element
+            .text()
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !(4..=160).contains(&title.len()) {
+            continue;
+        }
+        by_prefix
+            .entry(section.to_string())
+            .or_default()
+            .insert(url.to_string(), title);
+    }
+    let (_, links) = by_prefix.into_iter().max_by_key(|(_, links)| links.len())?;
+    if links.len() < 3 {
+        return None;
+    }
+    let mut links: Vec<(String, String)> = links.into_iter().collect();
+    links.sort();
+
+    let title = Html::parse_document(html)
+        .select(&Selector::parse("title").ok()?)
+        .next()
+        .map(|el| el.text().collect::<String>().trim().to_string())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| base.host_str().unwrap_or("Feed").to_string());
+    synthetic_feed(&title, base, links)
+}
+
+/// Sites without RSS often still publish a sitemap. Use it as a last resort so
+/// the feed is not empty; entries only carry a slug-derived title.
+async fn sitemap_feed(client: &Client, base: &Url) -> Option<feed_rs::model::Feed> {
+    let mut locs = Vec::new();
+    for path in ["/sitemap.xml", "/sitemap_index.xml"] {
+        let url = base.join(path).ok()?;
+        let Ok(fetched) = ssrf::get(client, &url, &HeaderMap::new()).await else {
+            continue;
+        };
+        if !fetched.status.is_success() {
+            continue;
+        }
+        let Ok(xml) = std::str::from_utf8(&fetched.body) else {
+            continue;
+        };
+        let found = sitemap_locs(xml);
+        if xml.contains("<sitemapindex") {
+            for child in found.iter().take(8) {
+                let Ok(url) = Url::parse(child) else {
+                    continue;
+                };
+                if url.host_str() != base.host_str() {
+                    continue;
+                }
+                let Ok(next) = ssrf::get(client, &url, &HeaderMap::new()).await else {
+                    continue;
+                };
+                if let Ok(xml) = std::str::from_utf8(&next.body) {
+                    locs.extend(sitemap_locs(xml));
+                }
+                if locs.len() >= 100 {
+                    break;
+                }
+            }
+        } else {
+            locs = found;
+        }
+        if locs.len() >= 3 {
+            break;
+        }
+    }
+    let mut links: Vec<(String, String)> = locs
+        .into_iter()
+        .filter_map(|loc| {
+            let url = Url::parse(&loc).ok()?;
+            if url.host_str() != base.host_str() {
+                return None;
+            }
+            let segments: Vec<&str> = url.path_segments()?.filter(|s| !s.is_empty()).collect();
+            if segments.is_empty() || ignored_section(segments[0]) {
+                return None;
+            }
+            let slug = segments.last()?;
+            if reserved_page(slug) {
+                return None;
+            }
+            let title = slug.replace(['-', '_'], " ");
+            if !(3..=120).contains(&title.len()) {
+                return None;
+            }
+            Some((url.to_string(), title))
+        })
+        .collect();
+    links.sort();
+    links.dedup_by(|a, b| a.0 == b.0);
+    if links.len() < 3 {
+        return None;
+    }
+    synthetic_feed(base.host_str().unwrap_or("Feed"), base, links)
+}
+
+pub(crate) fn sitemap_locs(xml: &str) -> Vec<String> {
+    let mut locs = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find("<loc>") {
+        rest = &rest[start + 5..];
+        let Some(end) = rest.find("</loc>") else {
+            break;
+        };
+        let loc = rest[..end].trim();
+        if loc.starts_with("http") {
+            locs.push(loc.to_string());
+        }
+        rest = &rest[end + 6..];
+    }
+    locs
+}
+
+fn reserved_page(slug: &str) -> bool {
+    matches!(
+        slug,
+        "" | "."
+            | "about"
+            | "contact"
+            | "now"
+            | "uses"
+            | "projects"
+            | "blog"
+            | "writing"
+            | "posts"
+            | "archive"
+            | "rss"
+            | "feed"
+            | "sitemap"
+            | "privacy"
+            | "terms"
+    )
+}
+
+fn synthetic_feed(
+    title: &str,
+    base: &Url,
+    links: Vec<(String, String)>,
+) -> Option<feed_rs::model::Feed> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"><title>{}</title><id>{}</id><updated>{}</updated>",
+        xml_escape(title),
+        xml_escape(base.as_str()),
+        now
+    );
+    for (url, title) in links.iter().take(100) {
+        xml.push_str(&format!(
+            "<entry><id>{}</id><title>{}</title><link href=\"{}\"/><updated>{}</updated></entry>",
+            xml_escape(url),
+            xml_escape(title),
+            xml_escape(url),
+            now
+        ));
+    }
+    xml.push_str("</feed>");
+    feed_rs::parser::parse(xml.as_bytes())
+        .ok()
+        .filter(|feed| !feed.entries.is_empty())
+}
+
+fn ignored_section(section: &str) -> bool {
+    matches!(
+        section,
+        "tag"
+            | "tags"
+            | "category"
+            | "categories"
+            | "author"
+            | "page"
+            | "search"
+            | "login"
+            | "account"
+            | "privacy"
+            | "terms"
+    )
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 async fn resolve_youtube(client: &Client, input: &Url) -> Result<Resolved, String> {
@@ -271,7 +513,12 @@ fn alternates(html: &str, base: &Url) -> Vec<Url> {
         .filter(|el| {
             matches!(
                 el.value().attr("type"),
-                Some("application/rss+xml" | "application/atom+xml")
+                Some(
+                    "application/rss+xml"
+                        | "application/atom+xml"
+                        | "application/feed+json"
+                        | "application/json"
+                )
             )
         })
         .filter_map(|el| el.value().attr("href"))

@@ -189,9 +189,9 @@ Element → token mapping (implement exactly):
 ## 8. Fetch worker (in-process)
 Tick 60s: select ≤50 active feeds with `next_fetch_at <= now`, oldest first.
 Semaphore = FETCH_CONCURRENCY. Politeness: never 2 in-flight per domain; ≥2s
-between same-domain fetches (in-memory map). reqwest: 20s timeout, UA
+between same-domain fetches (in-memory map). reqwest: 90s timeout, UA
 `dopefeed/1.0 (+{BASE_URL})`, conditional GET (stored ETag/Last-Modified), ≤5
-redirects, 2MB body cap. 304 → success, skip parse. Parse feed-rs; per entry:
+redirects, 10MB body cap. 304 → success, skip parse. Parse feed-rs; per entry:
 guid = id else link else sha256(title+link) [sha2]; skip if no title AND link;
 published = published else updated else now; content = body else summary else "";
 ammonia-sanitize (strip script/style/form/iframe); summary = 300 chars de-tagged.
@@ -209,9 +209,12 @@ Fields: `url` (feed/site/YouTube channel), `category`, optional `title`.
 1. SSRF (worker/ssrf.rs): http(s) only; resolve DNS; block loopback/private/
    link-local/unique-local (v4+v6); re-check every hop (manual redirects ≤5).
 2. Parse as feed (≥1 entry) → use. Else HTML → `<link rel="alternate"
-   type="application/rss+xml|atom+xml">` candidates, first that validates. Else
-   YouTube channel URL → extract channelId (`"channelId":"UC…"` or canonical) →
-   build feed URL. Else reject with friendly error.
+   type="application/rss+xml|atom+xml|feed+json">` candidates, first that
+   validates. Else synthesize an Atom feed from the largest group of same-site
+   article links, then from `/sitemap.xml` (or `/sitemap_index.xml`) as a last
+   resort. Else YouTube channel URL → extract channelId
+   (`"channelId":"UC…"` or canonical) → build feed URL. Else reject with
+   friendly error.
 3. Normalize URL; duplicate in any status → message, no insert.
 4. Insert status=active (title override else feed title else domain; site_url =
    first entry origin else input origin), next_fetch_at=now. Redirect to

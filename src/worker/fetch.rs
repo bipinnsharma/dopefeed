@@ -30,7 +30,7 @@ pub struct DueFeed {
 pub fn http_client(base_url: &str) -> anyhow::Result<Client> {
     let resolver: Arc<dyn reqwest::dns::Resolve> = Arc::new(ssrf::SafeResolver);
     Ok(Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(90))
         .user_agent(format!("dopefeed/1.0 (+{base_url})"))
         .redirect(reqwest::redirect::Policy::none())
         .gzip(true)

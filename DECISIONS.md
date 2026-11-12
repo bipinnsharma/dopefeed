@@ -30,6 +30,16 @@ Short log of choices that were not fully pinned down by `agent.md`.
   on jsDelivr (the rsms GitHub release download was blocked); Departure Mono
   from departuremono.com. `@font-face` is enabled in `tokens.css`.
 - **No dark mode** — token set is light-only; `color-scheme: light`.
+- **Feed metadata** — cards show a 20px favicon from Google S2
+  (`google.com/s2/favicons?domain=…`) and an "updated" date. The date is
+  `date(MAX(published_at))`, not `last_fetched_at`, so it reflects the newest
+  post. SQLite has no `%b` strftime directive (it silently returns NULL); use
+  `date()`/ISO output instead.
+- **HTML-only sites** — when no RSS exists, discovery first synthesizes
+  an Atom feed from same-site article links on the page, then from
+  `/sitemap.xml`/`/sitemap_index.xml` (following child sitemaps). Entry titles
+  are link text or slug-derived. This is best-effort and only for 0-post seeds;
+  sites that render posts only in JS remain empty.
 - **Static caching** — `/static/*` gets `Cache-Control: public, max-age=86400`
   in release and `no-cache` in debug, so asset edits show immediately; HTML is
   uncached.

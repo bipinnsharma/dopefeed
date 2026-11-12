@@ -26,7 +26,7 @@ pub struct Feed {
     pub category: String,
     pub post_count: i64,
     pub has_new_post: i64,
-    pub fetched_label: Option<String>,
+    pub latest_label: Option<String>,
 }
 
 impl Feed {
