@@ -35,6 +35,11 @@ Short log of choices that were not fully pinned down by `agent.md`.
   `date(MAX(published_at))`, not `last_fetched_at`, so it reflects the newest
   post. SQLite has no `%b` strftime directive (it silently returns NULL); use
   `date()`/ISO output instead.
+- **Reader cover / redirect** — the cover is the first image in the stored
+  entry (typically its OG/hero image), else the YouTube thumbnail, else a
+  favicon panel. A post whose feed carried only a link/summary has no body, so
+  `/read/{id}` renders an in-page "summary only" card that links to the source
+  instead of an empty article.
 - **HTML-only sites** — when no RSS exists, discovery first synthesizes
   an Atom feed from same-site article links on the page, then from
   `/sitemap.xml`/`/sitemap_index.xml` (following child sitemaps). Entry titles

@@ -21,6 +21,7 @@ struct FeedTemplate {
 #[template(path = "reader.html")]
 struct ReaderTemplate {
     post: Post,
+    cover: Option<String>,
     youtube_id: Option<String>,
 }
 
@@ -69,5 +70,13 @@ pub async fn read(State(state): State<AppState>, Path(id): Path<i64>) -> AppResu
     .ok_or(AppError::NotFound)?;
 
     let youtube_id = post.youtube_id().map(str::to_string);
-    Ok(Html(ReaderTemplate { post, youtube_id }.render()?))
+    let cover = post.cover_image();
+    Ok(Html(
+        ReaderTemplate {
+            post,
+            cover,
+            youtube_id,
+        }
+        .render()?,
+    ))
 }

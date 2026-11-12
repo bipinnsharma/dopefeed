@@ -705,6 +705,38 @@ fn youtube_guid_extracts_embed_id() {
 }
 
 #[test]
+fn post_cover_image_uses_body_image_then_youtube_thumbnail() {
+    let mut post = Post {
+        id: 1,
+        feed_id: 1,
+        feed_title: "t".into(),
+        feed_domain: "d".into(),
+        guid: "g".into(),
+        url: "https://example.com/posts/one".into(),
+        title: "t".into(),
+        author: None,
+        summary: String::new(),
+        content_html: String::new(),
+        published_label: "2025-01-01".into(),
+    };
+    assert!(post.is_stub());
+    assert!(post.cover_image().is_none());
+
+    post.content_html = r#"<p><img src="/hero.png" alt=""></p>"#.into();
+    assert!(!post.is_stub());
+    assert_eq!(
+        post.cover_image().as_deref(),
+        Some("https://example.com/hero.png")
+    );
+
+    post.guid = "yt:video:dQw4w9WgXcQ".into();
+    assert_eq!(
+        post.cover_image().as_deref(),
+        Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+    );
+}
+
+#[test]
 fn feed_parser_drops_empty_text_elements() {
     let xml = br#"<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">

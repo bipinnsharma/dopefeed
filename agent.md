@@ -166,11 +166,16 @@ Element → token mapping (implement exactly):
   `--color-border`; title `--font-size-16` weight 500 color `--color-ink`;
   summary `--font-size-13` `--color-ink-secondary`, 1 line clamp; date meta mono.
   Read state `.is-read`: opacity .55 (set by app.js).
-- Reader: max-width 680px, `--font-size-17`, `--leading-relaxed`; h1
-  `--font-size-32` `--leading-tight`; byline mono meta; links `--color-accent`
-  underline, hover `--color-accent-strong`; code/pre `--font-mono`
-  `--font-size-14` bg `--color-surface-subtle` `--radius-8`; blockquote border-left
-  2px `--color-border`; images max-width 100%, `--radius-8`. YouTube posts embed
+- Reader: max-width 720px, `--font-size-17`, line-height 1.7; fluid h1
+  `clamp(30px,5vw,44px)` weight 500, tight tracking; favicon crumb to the feed;
+  byline mono meta. Cover = first `<img>` in the entry (else YouTube thumbnail,
+  else a 180px favicon panel), `--radius-16` + `--shadow-card`; `og:image` and
+  the per-feed favicon are set in the head. Posts with no stored body render a
+  centered "summary only" card with the feed favicon, summary and a
+  `Continue reading` button to the source. Links `--color-accent` underline,
+  hover `--color-accent-strong`; code/pre `--font-mono` `--font-size-14`
+  bg `--color-surface-subtle` `--radius-8`; blockquote border-left 2px
+  `--color-border`; images max-width 100%, `--radius-12`. YouTube posts embed
   `https://www.youtube-nocookie.com/embed/{id}` 16:9 above content.
 - Buttons (Submit form etc.): bg `--color-ink`, text `--color-ink-inverse`,
   `--radius-8`, padding `--space-8` `--space-16`, weight 500, hover opacity .9.

@@ -1,14 +1,55 @@
 {% extends "base.html" %}
-{% block title %}{{ post.title }} — dopefeed{% endblock %}
+{% block title %}{{ post.title }} — {{ post.feed_title }}{% endblock %}
+{% block head %}
+<link rel="icon" href="https://www.google.com/s2/favicons?domain={{ post.feed_domain }}&amp;sz=64">
+{% if let Some(cover) = cover %}<meta property="og:image" content="{{ cover }}">{% endif %}
+{% endblock %}
 {% block content %}
 <article class="reader" data-post-id="{{ post.id }}">
-  <p class="meta reader-meta"><a href="/f/{{ post.feed_id }}">{{ post.feed_title }}</a> • {{ post.published_label }}{% if let Some(author) = post.author %} • {{ author }}{% endif %}</p>
+  <a class="reader-crumb" href="/f/{{ post.feed_id }}">
+    <img src="https://www.google.com/s2/favicons?domain={{ post.feed_domain }}&amp;sz=64"
+         alt="" width="16" height="16" loading="lazy">
+    <span>{{ post.feed_title }}</span>
+  </a>
   <h1 class="reader-title">{{ post.title }}</h1>
+  <p class="meta reader-meta">{{ post.published_label }}{% if let Some(author) = post.author %} • {{ author }}{% endif %}</p>
+
   {% if let Some(id) = youtube_id %}
   <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/{{ id }}" title="Video"
        loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+  {% else %}
+  {% if let Some(cover) = cover %}
+  <figure class="reader-cover">
+    <img src="{{ cover }}" alt="" loading="eager">
+  </figure>
+  {% else %}
+  {% if !post.is_stub() %}
+  <div class="reader-cover reader-cover-fallback">
+    <img src="https://www.google.com/s2/favicons?domain={{ post.feed_domain }}&amp;sz=128"
+         alt="" width="64" height="64" loading="lazy">
+  </div>
   {% endif %}
+  {% endif %}
+
+  {% if post.is_stub() %}
+  <section class="reader-redirect">
+    <img class="reader-redirect-icon" src="https://www.google.com/s2/favicons?domain={{ post.feed_domain }}&amp;sz=128"
+         alt="" width="56" height="56" loading="lazy">
+    <p class="reader-kicker">Summary only</p>
+    <h2 class="reader-redirect-title">This post lives on {{ post.feed_domain }}</h2>
+    {% if !post.summary.is_empty() %}<p class="reader-redirect-copy">{{ post.summary }}</p>{% endif %}
+    <a class="button reader-cta" href="{{ post.url }}" target="_blank" rel="noopener noreferrer">
+      Continue reading <span aria-hidden="true">→</span>
+    </a>
+    <p class="meta reader-redirect-note">The feed only includes a summary, so dopefeed links you to the source.</p>
+  </section>
+  {% else %}
   <div class="reader-body">{{ post.content_html|safe }}</div>
-  <p class="meta reader-origin"><a href="{{ post.url }}" rel="noopener noreferrer" target="_blank">Read original →</a></p>
+  {% endif %}
+  {% endif %}
+
+  <footer class="reader-foot">
+    <a href="{{ post.url }}" rel="noopener noreferrer" target="_blank">Read original on {{ post.feed_domain }} →</a>
+  </footer>
 </article>
 {% endblock %}

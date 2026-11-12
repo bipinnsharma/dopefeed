@@ -60,6 +60,33 @@ impl Post {
                     .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         })
     }
+
+    /// Feeds that only publish a link/summary have no readable article body.
+    pub fn is_stub(&self) -> bool {
+        self.content_html.trim().is_empty()
+    }
+
+    /// First image in the entry (its usual OG/hero image), else the YouTube
+    /// thumbnail. Used as the detail-page cover.
+    pub fn cover_image(&self) -> Option<String> {
+        if let Some(id) = self.youtube_id() {
+            return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
+        }
+        let document = scraper::Html::parse_fragment(&self.content_html);
+        let selector = scraper::Selector::parse("img[src]").ok()?;
+        let base = url::Url::parse(&self.url).ok();
+        document
+            .select(&selector)
+            .filter_map(|element| element.value().attr("src"))
+            .find_map(|src| {
+                let src = src.trim();
+                let url = base
+                    .as_ref()
+                    .and_then(|base| base.join(src).ok())
+                    .or_else(|| url::Url::parse(src).ok())?;
+                matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+            })
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -42,5 +42,5 @@ impl AppState {
 pub const POST_COLUMNS: &str = r#"
 p.id, p.feed_id, f.title AS feed_title, f.domain AS feed_domain, p.guid,
 p.url, p.title, p.author, p.summary, p.content_html,
-strftime('%b %d, %Y', p.published_at) AS published_label
+date(p.published_at) AS published_label
 "#;

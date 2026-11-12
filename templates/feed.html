@@ -4,7 +4,11 @@
 {% if let Some(flash) = flash %}<div class="flash">{{ flash }}</div>{% endif %}
 <header class="page-head">
   <div class="page-head-row">
-    <h1 class="page-title">{{ feed.title }}</h1>
+    <div class="page-head-title">
+      <img class="feed-icon feed-icon-lg" src="https://www.google.com/s2/favicons?domain={{ feed.domain }}&amp;sz=64"
+           alt="" width="28" height="28" loading="lazy">
+      <h1 class="page-title">{{ feed.title }}</h1>
+    </div>
     <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"
             aria-label="Subscribe to {{ feed.title }}" title="Subscribe">+</button>
   </div>
