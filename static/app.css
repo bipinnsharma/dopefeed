@@ -24,6 +24,7 @@ img { max-width: 100%; }
 @media (any-hover: hover) and (any-pointer: fine) {
   body { cursor: url("/static/cursor.svg") 3 3, auto; }
   body * { cursor: inherit; }
+  a[href] { cursor: url("/static/pointer.svg") 3 3, pointer; }
 }
 
 @media (prefers-reduced-motion: reduce) {
