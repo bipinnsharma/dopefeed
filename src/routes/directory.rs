@@ -133,6 +133,7 @@ async fn load(pool: &SqlitePool, query: &DirectoryQuery) -> AppResult<FeedPage> 
 
     let mut feeds = QueryBuilder::<Sqlite>::new(
         "SELECT f.id, f.site_url, f.domain, f.title, f.description, f.category,
+         f.avatar_url, f.banner_url,
          date((SELECT MAX(p.published_at) FROM posts p WHERE p.feed_id = f.id)) AS latest_label,
          (SELECT COUNT(*) FROM posts p WHERE p.feed_id = f.id) AS post_count,
          EXISTS(SELECT 1 FROM posts p WHERE p.feed_id = f.id

@@ -179,6 +179,8 @@ async fn refresh_handles_304_as_success() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        category: "tech".into(),
+        images_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
     assert_eq!(post_count(&state.pool, id).await, 0);
@@ -215,6 +217,8 @@ async fn refresh_success_adapts_interval() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        category: "tech".into(),
+        images_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -262,6 +266,8 @@ async fn refresh_rediscovers_html_feed_with_existing_posts() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        category: "tech".into(),
+        images_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -293,6 +299,8 @@ async fn refresh_failure_backs_off() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        category: "tech".into(),
+        images_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -333,6 +341,8 @@ async fn refresh_rejects_oversized_body() {
         fetch_interval_secs: 3600,
         error_count: 0,
         domain: "127.0.0.1".into(),
+        category: "tech".into(),
+        images_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
     let last_error: Option<String> =
@@ -965,4 +975,114 @@ fn feed_parser_drops_empty_text_elements() {
     assert!(feed_rs::parser::parse(xml.as_slice()).is_err());
     let feed = crate::worker::discover::parse_feed(xml).unwrap();
     assert_eq!(feed.entries.len(), 1);
+}
+
+#[test]
+fn youtube_thumb_is_derived_from_guid() {
+    let mut post = Post {
+        id: 1,
+        feed_id: 1,
+        feed_title: "t".into(),
+        feed_domain: "d".into(),
+        guid: "yt:video:dQw4w9WgXcQ".into(),
+        url: "u".into(),
+        title: "t".into(),
+        author: None,
+        summary: String::new(),
+        content_html: String::new(),
+        published_label: "2025-01-01".into(),
+    };
+    assert_eq!(
+        post.youtube_thumb().as_deref(),
+        Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg")
+    );
+    post.guid = "guid".into();
+    assert!(post.youtube_thumb().is_none());
+}
+
+#[test]
+fn channel_images_read_avatar_and_both_banner_shapes() {
+    let legacy = r#"<script>var ytInitialData = {"metadata":{"channelMetadataRenderer":
+    {"avatar":{"thumbnails":[
+      {"url":"https://yt3.googleusercontent.com/a=s88","width":88},
+      {"url":"https://yt3.googleusercontent.com/a=s900","width":900}]}}},
+      "header":{"banner":{"thumbnails":[
+      {"url":"https://yt3.googleusercontent.com/b=w1060","width":1060},
+      {"url":"https://yt3.googleusercontent.com/b=w2276","width":2276}]}}};</script>"#;
+    let images = crate::worker::discover::extract_channel_images(legacy);
+    assert_eq!(
+        images.avatar.as_deref(),
+        Some("https://yt3.googleusercontent.com/a=s900")
+    );
+    assert_eq!(
+        images.banner.as_deref(),
+        Some("https://yt3.googleusercontent.com/b=w2276")
+    );
+
+    let current = r#"<script>var ytInitialData = {"header":{"banner":{"imageBannerViewModel":
+    {"image":{"sources":[
+      {"url":"https://yt3.googleusercontent.com/c=w1060","width":1060},
+      {"url":"https://yt3.googleusercontent.com/c=w2276","width":2276}]}}}}};</script>"#;
+    let images = crate::worker::discover::extract_channel_images(current);
+    assert_eq!(
+        images.banner.as_deref(),
+        Some("https://yt3.googleusercontent.com/c=w2276")
+    );
+}
+
+#[test]
+fn channel_images_reject_foreign_hosts() {
+    let html = r#"<script>var ytInitialData = {"metadata":{"channelMetadataRenderer":
+    {"avatar":{"thumbnails":[{"url":"https://evil.example/a.jpg","width":900}]}}},
+    "header":{"banner":{"thumbnails":[{"url":"https://evil.example/b.jpg","width":2276}]}}};</script>"#;
+    let images = crate::worker::discover::extract_channel_images(html);
+    assert!(images.avatar.is_none());
+    assert!(images.banner.is_none());
+}
+
+#[tokio::test]
+async fn directory_card_renders_channel_avatar() {
+    let (base, state) = spawn_app().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    let avatar = "https://yt3.googleusercontent.com/ytc/abc=s900-c-k-c0x00ffffff-no-rj";
+    sqlx::query("UPDATE feeds SET category = 'youtube', avatar_url = ? WHERE id = ?")
+        .bind(avatar)
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let html = Client::new()
+        .get(format!("{base}/"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains(avatar));
+    assert!(html.contains(r#"width="48" height="48""#));
+}
+
+#[tokio::test]
+async fn feed_page_renders_youtube_thumbnail() {
+    let (base, state) = spawn_app().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    add_post(
+        &state.pool,
+        id,
+        "yt:video:dQw4w9WgXcQ",
+        "Video",
+        "2025-01-01 00:00:00",
+    )
+    .await;
+    let html = Client::new()
+        .get(format!("{base}/f/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg"));
+    assert!(html.contains(r#"width="96" height="54""#));
 }

@@ -1,5 +1,16 @@
 <a class="post-row" href="/read/{{ post.id }}" data-post-id="{{ post.id }}">
-  <h2 class="post-title">{{ post.title }}</h2>
-  <p class="post-summary">{{ post.summary }}</p>
-  <p class="meta">{{ post.feed_domain }} • {{ post.published_label }}</p>
+  {% if let Some(thumb) = post.youtube_thumb() %}
+  <span class="post-thumb">
+    <svg class="post-thumb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M9 6.5v11l9-5.5-9-5.5Z"/>
+    </svg>
+    <img src="{{ thumb }}" alt="" width="96" height="54" loading="lazy"
+         onerror="this.remove()">
+  </span>
+  {% endif %}
+  <div class="post-row-text">
+    <h2 class="post-title">{{ post.title }}</h2>
+    <p class="post-summary">{{ post.summary }}</p>
+    <p class="meta">{{ post.feed_domain }} • {{ post.published_label }}</p>
+  </div>
 </a>

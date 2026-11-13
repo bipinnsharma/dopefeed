@@ -14,6 +14,10 @@
   --color-fill-active:#00000017; --color-fill-active:oklch(0% 0 0/.09);
   --color-fill-strong:#0000001f; --color-fill-strong:oklch(0% 0 0/.122);
   --color-overlay:#0b0b0b66; --color-overlay:oklch(15% 0 0/.4);
+  /* Text over a cover image (scrim is dark in both themes). */
+  --color-scrim:#000000b8; --color-scrim:oklch(0% 0 0/.72);
+  --color-on-scrim:#ffffff; --color-on-scrim:oklch(100% 0 0);
+  --color-on-scrim-secondary:#ffffffbe; --color-on-scrim-secondary:oklch(100% 0 0/.75);
   --color-accent:#ff4000; --color-accent:oklch(68% .27 48);
   --color-accent-strong:#f62b00; --color-accent-strong:oklch(62% .26 48);
   --color-highlight:#f900a3; --color-highlight:oklch(64% .28 350);

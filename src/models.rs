@@ -24,6 +24,8 @@ pub struct Feed {
     pub title: String,
     pub description: Option<String>,
     pub category: String,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
     pub post_count: i64,
     pub has_new_post: i64,
     pub latest_label: Option<String>,
@@ -81,6 +83,12 @@ impl Post {
     /// Feeds that only publish a link/summary have no readable article body.
     pub fn is_stub(&self) -> bool {
         self.content_html.trim().is_empty()
+    }
+
+    /// 16:9 card thumbnail derived from the guid — no fetch, no DB column.
+    pub fn youtube_thumb(&self) -> Option<String> {
+        self.youtube_id()
+            .map(|id| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
     }
 
     /// First image in the entry (its usual OG/hero image), else the YouTube

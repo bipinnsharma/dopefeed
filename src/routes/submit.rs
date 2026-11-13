@@ -199,11 +199,14 @@ pub async fn insert_resolved(
     } else {
         (resolved.etag.clone(), resolved.last_modified.clone())
     };
+    let images_fetched_at = resolved
+        .images_fetched
+        .then(|| chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
 
     let result = sqlx::query(
         "INSERT INTO feeds (url, site_url, domain, title, description, category, status,
-         etag, last_modified, last_fetched_at, next_fetch_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))",
+         avatar_url, banner_url, images_fetched_at, etag, last_modified, last_fetched_at, next_fetch_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
     )
     .bind(&resolved.feed_url)
     .bind(&resolved.site_url)
@@ -211,6 +214,9 @@ pub async fn insert_resolved(
     .bind(&title)
     .bind(resolved.description.clone())
     .bind(category)
+    .bind(resolved.avatar_url.clone())
+    .bind(resolved.banner_url.clone())
+    .bind(images_fetched_at)
     .bind(etag)
     .bind(last_modified)
     .execute(&state.pool)

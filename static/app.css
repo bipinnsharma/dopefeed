@@ -263,7 +263,7 @@ img { max-width: 100%; }
   min-height: 148px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-8);
+  border-radius: var(--radius-12);
   padding: var(--space-16);
   transition: border-color var(--duration-base) var(--ease-standard);
 }
@@ -283,6 +283,8 @@ img { max-width: 100%; }
   outline-offset: -1px;
 }
 [data-theme="dark"] .feed-icon { outline-color: oklch(100% 0 0/.12); }
+.feed-avatar { object-fit: cover; }
+.feed-card .feed-avatar { width: 48px; height: 48px; }
 .feed-card-text { flex: 1; min-width: 0; }
 .feed-card-title {
   margin: 0;
@@ -366,13 +368,42 @@ img { max-width: 100%; }
 /* Post lists */
 .post-list { border-top: 1px solid var(--color-border); }
 .post-row {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
   padding-block: var(--space-12);
   border-bottom: 1px solid var(--color-border);
   transition: opacity var(--duration-base) var(--ease-standard);
 }
 .post-row:hover .post-title { color: var(--color-accent); }
 .post-row.is-read { opacity: .55; }
+.post-row-text { flex: 1; min-width: 0; }
+.post-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 96px;
+  height: 54px;
+  overflow: hidden;
+  border-radius: var(--radius-8);
+  background: var(--color-surface-muted);
+  outline: 1px solid oklch(0% 0 0/.1);
+  outline-offset: -1px;
+}
+[data-theme="dark"] .post-thumb { outline-color: oklch(100% 0 0/.12); }
+.post-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.post-thumb-play {
+  width: 20px;
+  height: 20px;
+  color: var(--color-ink-tertiary);
+}
 .post-title {
   margin: 0 0 var(--space-4);
   font-size: var(--font-size-16);
@@ -423,6 +454,75 @@ img { max-width: 100%; }
   color: var(--color-ink-secondary);
 }
 .header-actions { display: flex; align-items: center; gap: var(--space-16); }
+.feed-page { max-width: 820px; }
+
+/* Feed cover — banner under a scrim so the title stays readable on any image. */
+.feed-cover {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 180px;
+  margin-bottom: var(--space-16);
+  overflow: hidden;
+  border-radius: var(--radius-12);
+  background: var(--color-surface-muted);
+}
+.feed-cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.feed-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--color-scrim) 0%,
+    var(--color-scrim) 30%,
+    transparent 80%
+  );
+}
+.feed-cover-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  padding: var(--space-20);
+  color: var(--color-on-scrim);
+}
+.feed-cover-avatar {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-full);
+  outline: 1px solid oklch(100% 0 0/.25);
+  outline-offset: -1px;
+}
+.feed-cover-text { flex: 1; min-width: 0; }
+.feed-cover-title {
+  margin: 0;
+  font-size: var(--font-size-28);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  overflow-wrap: anywhere;
+}
+.feed-cover-meta {
+  margin: var(--space-4) 0 0;
+  color: var(--color-on-scrim-secondary);
+}
+.feed-cover .subscribe {
+  background: transparent;
+  border-color: oklch(100% 0 0/.35);
+  color: var(--color-on-scrim);
+}
+.feed-cover .subscribe:hover { background: oklch(100% 0 0/.15); }
 .feed-desc {
   margin: var(--space-8) 0 0;
   font-size: var(--font-size-14);
@@ -716,6 +816,25 @@ img { max-width: 100%; }
 @media (min-width: 640px) {
   .hero h1 { font-size: var(--font-size-48); }
   .feed-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Narrow screens: the banner art clashes with an overlay title, so stack them. */
+@media (max-width: 639px) {
+  .feed-cover { display: block; min-height: 0; background: none; }
+  .feed-cover-img {
+    position: static;
+    height: 120px;
+    border-radius: var(--radius-12);
+  }
+  .feed-cover::after { display: none; }
+  .feed-cover-body { padding: var(--space-12) 0 0; color: var(--color-ink); }
+  .feed-cover-avatar { width: 40px; height: 40px; outline-color: var(--color-border); }
+  .feed-cover-title { font-size: var(--font-size-24); }
+  .feed-cover-meta { color: var(--color-ink-secondary); }
+  .feed-cover .subscribe {
+    background: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-ink-secondary);
+  }
 }
 @media (min-width: 1024px) {
   .feed-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

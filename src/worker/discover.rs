@@ -7,6 +7,7 @@ use scraper::{Html, Selector};
 use url::Url;
 
 const YOUTUBE_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const YOUTUBE_DESKTOP_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
 const YOUTUBE_COOKIE: &str = "CONSENT=YES+cb.20210328-17-p0.en+FX+417; SOCS=CAI";
 
 pub struct Resolved {
@@ -14,6 +15,10 @@ pub struct Resolved {
     pub site_url: String,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    /// True when the channel page was fetched, even if it had no artwork.
+    pub images_fetched: bool,
     pub feed: feed_rs::model::Feed,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
@@ -309,6 +314,8 @@ async fn resolve_youtube(client: &Client, input: &Url) -> Result<Resolved, Strin
         Some(id) => id,
         None => channel_id_from_page(client, input).await?,
     };
+    // Channel artwork is best-effort; a miss must never fail the submission.
+    let images = fetch_channel_images(client, &channel_id).await;
     let feed_url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
     let url =
         Url::parse(&feed_url).map_err(|_| "That YouTube channel has an invalid id.".to_string())?;
@@ -318,13 +325,13 @@ async fn resolve_youtube(client: &Client, input: &Url) -> Result<Resolved, Strin
         let fetched = ssrf::get(client, &url, &HeaderMap::new()).await?;
         if fetched.status.is_success() {
             if let Some(feed) = parse_feed(&fetched.body) {
-                return Ok(build(
-                    fetched.final_url,
-                    feed,
-                    fetched.headers,
-                    input,
-                    false,
-                ));
+                let mut resolved = build(fetched.final_url, feed, fetched.headers, input, false);
+                if let Some(images) = &images {
+                    resolved.avatar_url = images.avatar.clone();
+                    resolved.banner_url = images.banner.clone();
+                    resolved.images_fetched = true;
+                }
+                return Ok(resolved);
             }
         } else {
             last_status = Some(fetched.status);
@@ -365,6 +372,140 @@ fn is_youtube(url: &Url) -> bool {
         url.host_str(),
         Some("youtube.com" | "www.youtube.com" | "m.youtube.com")
     )
+}
+
+/// Channel artwork lifted from a channel page's `ytInitialData`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChannelImages {
+    pub avatar: Option<String>,
+    pub banner: Option<String>,
+}
+
+/// Best-effort: a failed fetch or missing artwork is not an error.
+pub async fn fetch_channel_images(client: &Client, channel_id: &str) -> Option<ChannelImages> {
+    let url = Url::parse(&format!("https://www.youtube.com/channel/{channel_id}")).ok()?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static(YOUTUBE_DESKTOP_UA));
+    headers.insert(COOKIE, HeaderValue::from_static(YOUTUBE_COOKIE));
+    let fetched = ssrf::get(client, &url, &headers).await.ok()?;
+    if !fetched.status.is_success() {
+        return None;
+    }
+    let html = std::str::from_utf8(&fetched.body).ok()?;
+    Some(extract_channel_images(html))
+}
+
+pub fn extract_channel_images(html: &str) -> ChannelImages {
+    let Some(data) = initial_data(html) else {
+        return ChannelImages::default();
+    };
+    let avatar = data
+        .pointer("/metadata/channelMetadataRenderer/avatar/thumbnails")
+        .and_then(largest_image);
+    // YouTube moved banners from `banner.thumbnails` to
+    // `banner.imageBannerViewModel.image.sources`; accept both.
+    let banner = find_key_image(&data, "banner");
+    ChannelImages {
+        avatar: avatar.as_deref().and_then(safe_image_url),
+        banner: banner.as_deref().and_then(safe_image_url),
+    }
+}
+
+/// The channel id embedded in a YouTube RSS feed URL.
+pub fn channel_id_from_feed_url(feed_url: &str) -> Option<String> {
+    let url = Url::parse(feed_url).ok()?;
+    is_youtube(&url)
+        .then(|| channel_id_from_query(&url))
+        .flatten()
+}
+
+fn initial_data(html: &str) -> Option<serde_json::Value> {
+    let marker = html.find("ytInitialData")?;
+    let start = marker + html[marker..].find('{')?;
+    let end = json_object_end(html.as_bytes(), start)?;
+    serde_json::from_str(&html[start..end]).ok()
+}
+
+/// End offset (exclusive) of the JSON object starting at `start`.
+fn json_object_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, &byte) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Picks the widest `url` anywhere below `value`.
+fn largest_image(value: &serde_json::Value) -> Option<String> {
+    fn walk(value: &serde_json::Value, best: &mut Option<(i64, String)>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(url) = map.get("url").and_then(serde_json::Value::as_str) {
+                    let width = map
+                        .get("width")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0);
+                    if best.as_ref().is_none_or(|(best, _)| width >= *best) {
+                        *best = Some((width, url.to_string()));
+                    }
+                }
+                for child in map.values() {
+                    walk(child, best);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, best);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut best = None;
+    walk(value, &mut best);
+    best.map(|(_, url)| url)
+}
+
+fn find_key_image(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(url) = map.get(key).and_then(largest_image) {
+                return Some(url);
+            }
+            map.values().find_map(|child| find_key_image(child, key))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|item| find_key_image(item, key)),
+        _ => None,
+    }
+}
+
+/// Only YouTube's own image CDN is allowed into the templates.
+fn safe_image_url(raw: &str) -> Option<String> {
+    let url = Url::parse(raw).ok()?;
+    (url.scheme() == "https" && url.host_str() == Some("yt3.googleusercontent.com"))
+        .then(|| url.to_string())
 }
 
 fn channel_id_from_path(url: &Url) -> Option<String> {
@@ -520,6 +661,9 @@ fn build(
         site_url: site_url.to_string(),
         title,
         description,
+        avatar_url: None,
+        banner_url: None,
+        images_fetched: false,
         feed,
         etag: ssrf::header_value(&headers, ETAG),
         last_modified: ssrf::header_value(&headers, LAST_MODIFIED),

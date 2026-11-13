@@ -24,6 +24,8 @@ pub struct DueFeed {
     pub fetch_interval_secs: i64,
     pub error_count: i64,
     pub domain: String,
+    pub category: String,
+    pub images_fetched_at: Option<String>,
 }
 
 pub fn http_client(base_url: &str) -> anyhow::Result<Client> {
@@ -44,6 +46,10 @@ pub fn sqlite_time(time: DateTime<Utc>) -> String {
 /// Fetches one feed and persists the result. Fetch/parse failures update backoff
 /// instead of returning an error; only database failures bubble up.
 pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
+    if feed.category == "youtube" && feed.images_fetched_at.is_none() {
+        backfill_channel_images(state, feed).await?;
+    }
+
     let url = Url::parse(&feed.url).map_err(|e| anyhow!("bad feed url: {e}"))?;
     let mut headers = HeaderMap::new();
     if let Some(etag) = &feed.etag
@@ -97,6 +103,28 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
 
     let new = ingest(&state.pool, feed.id, &parsed, &feed.site_url).await?;
     succeed(state, feed, new, &fetched.headers).await?;
+    Ok(())
+}
+
+/// Fetches the channel page once to learn the avatar/banner. The marker column
+/// means channels without artwork are not refetched on every refresh.
+async fn backfill_channel_images(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
+    let Some(channel_id) = discover::channel_id_from_feed_url(&feed.url) else {
+        return Ok(());
+    };
+    let Some(images) = discover::fetch_channel_images(&state.http, &channel_id).await else {
+        return Ok(());
+    };
+    sqlx::query(
+        "UPDATE feeds SET avatar_url = COALESCE(?, avatar_url),
+         banner_url = COALESCE(?, banner_url), images_fetched_at = ? WHERE id = ?",
+    )
+    .bind(images.avatar)
+    .bind(images.banner)
+    .bind(sqlite_time(Utc::now()))
+    .bind(feed.id)
+    .execute(&state.pool)
+    .await?;
     Ok(())
 }
 
