@@ -8,10 +8,16 @@
   <img class="feed-cover-img" src="{{ banner }}" alt="" width="1200" height="180" loading="eager"
        onerror="this.remove()">
   <div class="feed-cover-body">
+    {% if let Some(avatar) = feed.avatar_url %}
+    <img class="feed-cover-avatar" src="{{ avatar }}" alt="{{ feed.title }}"
+         width="48" height="48" loading="lazy"
+         onerror="this.src='/static/no-image-dl.jpg'">
+    {% else %}
     <img class="feed-cover-avatar"
-         src="{{ feed.avatar_url.as_deref().unwrap_or("/static/no-image-dl.jpg") }}"
+         src="https://www.google.com/s2/favicons?domain={{ feed.domain }}&amp;sz=64"
          alt="{{ feed.title }}" width="48" height="48" loading="lazy"
          onerror="this.src='/static/no-image-dl.jpg'">
+    {% endif %}
     <div class="feed-cover-text">
       <h1 class="feed-cover-title">{{ feed.title }}</h1>
       {% if let Some(description) = feed.description %}<p class="feed-desc feed-cover-desc">{{ description }}</p>{% endif %}
@@ -25,10 +31,16 @@
 <header class="page-head">
   <div class="page-head-row">
     <div class="page-head-title">
+      {% if let Some(avatar) = feed.avatar_url %}
+      <img class="feed-icon feed-icon-lg feed-avatar" src="{{ avatar }}" alt="{{ feed.title }}"
+           width="40" height="40" loading="lazy"
+           onerror="this.src='/static/no-image-dl.jpg'">
+      {% else %}
       <img class="feed-icon feed-icon-lg feed-avatar"
-           src="{{ feed.avatar_url.as_deref().unwrap_or("/static/no-image-dl.jpg") }}"
+           src="https://www.google.com/s2/favicons?domain={{ feed.domain }}&amp;sz=64"
            alt="{{ feed.title }}" width="40" height="40" loading="lazy"
            onerror="this.src='/static/no-image-dl.jpg'">
+      {% endif %}
       <h1 class="page-title">{{ feed.title }}</h1>
     </div>
     <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"

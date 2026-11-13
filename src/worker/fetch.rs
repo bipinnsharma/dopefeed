@@ -190,6 +190,9 @@ async fn backfill_site_cover(state: &AppState, feed: &DueFeed) -> anyhow::Result
         .ok()
         .and_then(|html| discover::extract_og_image(html, &fetched.final_url));
     let local = crate::assets::cache_or_keep(&state.http, image, "feeds").await;
+    // A remote URL that could not be cached is likely dead (an expired CDN
+    // preview); no cover beats a broken one.
+    let local = local.filter(|url| !url.starts_with("http"));
     sqlx::query(
         "UPDATE feeds SET banner_url = COALESCE(banner_url, ?), images_fetched_at = ? WHERE id = ?",
     )
