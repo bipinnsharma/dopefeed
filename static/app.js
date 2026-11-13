@@ -140,6 +140,20 @@
 
   paintTheme();
 
+  var FONT_KEY = "dopefeed.readerFont";
+  var fontSelect = document.querySelector("select[data-reader-font]");
+  if (fontSelect) {
+    fontSelect.value = root.dataset.readerFont || "book";
+    fontSelect.addEventListener("change", function () {
+      root.dataset.readerFont = fontSelect.value;
+      try {
+        localStorage.setItem(FONT_KEY, fontSelect.value);
+      } catch (e) {
+        /* storage unavailable: font applies for this page only */
+      }
+    });
+  }
+
   var timeline = document.getElementById("timeline");
   if (timeline) {
     if (subs.length === 0) {

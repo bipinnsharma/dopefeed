@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-reader-font="book">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
 {% include "_theme_init.html" %}
+<script>
+(function () {
+  var font = "book";
+  try { font = localStorage.getItem("dopefeed.readerFont") || "book"; } catch (e) {}
+  if (font !== "system" && font !== "book" && font !== "book-large") font = "book";
+  document.documentElement.dataset.readerFont = font;
+})();
+</script>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
@@ -15,7 +23,18 @@
 <header class="reader-bar">
   <div class="reader-bar-inner">
     <a class="reader-brand" href="/"><img src="/static/logo.svg" alt="" width="22" height="22">dopefeed</a>
-    {% include "_theme_toggle.html" %}
+    <div class="reader-bar-actions">
+      <div class="reader-font">
+        <svg class="reader-font-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M87.24,52.59a8,8,0,0,0-14.48,0l-64,136a8,8,0,1,0,14.48,6.81L39.9,160h80.2l16.66,35.4a8,8,0,1,0,14.48-6.81ZM47.43,144,80,74.79,112.57,144ZM200,96c-12.76,0-22.73,3.47-29.63,10.32a8,8,0,0,0,11.26,11.36c3.8-3.77,10-5.68,18.37-5.68,13.23,0,24,9,24,20v3.22A42.76,42.76,0,0,0,200,128c-22.06,0-40,16.15-40,36s17.94,36,40,36a42.73,42.73,0,0,0,24-7.25,8,8,0,0,0,16-.75V132C240,112.15,222.06,96,200,96Zm0,88c-13.23,0-24-9-24-20s10.77-20,24-20,24,9,24,20S213.23,184,200,184Z"/></svg>
+        <select class="reader-font-select" data-reader-font aria-label="Reading font">
+          <option value="system">System</option>
+          <option value="book">Book</option>
+          <option value="book-large">Book &middot; Large</option>
+        </select>
+        <svg class="reader-font-caret" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"/></svg>
+      </div>
+      {% include "_theme_toggle.html" %}
+    </div>
   </div>
 </header>
 <main class="reader-main">
