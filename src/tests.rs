@@ -161,6 +161,34 @@ async fn ingest_dedups_and_sanitizes() {
 }
 
 #[tokio::test]
+async fn ingest_repairs_a_fallback_date() {
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://example.com/feed.xml", "active").await;
+    add_post(
+        &state.pool,
+        id,
+        "fixture-1",
+        "First post",
+        "2026-11-13 00:00:00",
+    )
+    .await;
+    let feed = feed_rs::parser::parse(RSS).unwrap();
+
+    fetch::ingest(&state.pool, id, &feed, "https://example.com")
+        .await
+        .unwrap();
+
+    let published: String = sqlx::query_scalar(
+        "SELECT published_at FROM posts WHERE feed_id = ? AND guid = 'fixture-1'",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(published, "2025-01-01 10:00:00");
+}
+
+#[tokio::test]
 async fn refresh_handles_304_as_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1161,6 +1189,26 @@ fn channel_videos_are_lifted_from_the_page() {
     assert_eq!(videos[0].title, "A video");
     let age = chrono::Utc::now() - videos[0].published.unwrap();
     assert!((age.num_hours() - 72).abs() <= 1);
+}
+
+#[test]
+fn channel_videos_parse_short_relative_dates() {
+    let html = r#"<script>var ytInitialData = {"contents":[
+      {"lockupViewModel":{"contentId":"dQw4w9WgXcQ","metadata":{"lockupMetadataViewModel":{
+        "title":{"content":"A year old video"},
+        "metadata":{"contentMetadataViewModel":{"metadataRows":[{"metadataParts":[
+          {"text":{"content":"1 yr ago"}}]}]}}}}}},
+      {"lockupViewModel":{"contentId":"9bZkp7q19f0","metadata":{"lockupMetadataViewModel":{
+        "title":{"content":"An eleven month old video"},
+        "metadata":{"contentMetadataViewModel":{"metadataRows":[{"metadataParts":[
+          {"text":{"content":"11 mo ago"}}]}]}}}}}}
+    ]};</script>"#;
+    let videos = crate::worker::discover::extract_channel_videos(html);
+    assert_eq!(videos.len(), 2);
+    let year = (chrono::Utc::now() - videos[0].published.unwrap()).num_days();
+    assert!((year - 365).abs() <= 1, "{year} days");
+    let months = (chrono::Utc::now() - videos[1].published.unwrap()).num_days();
+    assert!((months - 330).abs() <= 1, "{months} days");
 }
 
 #[test]

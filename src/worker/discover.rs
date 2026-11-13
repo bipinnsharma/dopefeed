@@ -569,13 +569,14 @@ fn relative_seconds(text: &str) -> Option<i64> {
     let count: i64 = parts.next()?.parse().ok()?;
     let unit = parts.next()?.trim_end_matches('s');
     let seconds = match unit {
-        "second" => 1,
-        "minute" => 60,
-        "hour" => 3600,
+        // YouTube's channel page abbreviates older dates: "1 yr ago".
+        "second" | "sec" => 1,
+        "minute" | "min" => 60,
+        "hour" | "hr" => 3600,
         "day" => 86_400,
-        "week" => 604_800,
-        "month" => 2_592_000,
-        "year" => 31_536_000,
+        "week" | "wk" => 604_800,
+        "month" | "mo" => 2_592_000,
+        "year" | "yr" => 31_536_000,
         _ => return None,
     };
     Some(count * seconds)

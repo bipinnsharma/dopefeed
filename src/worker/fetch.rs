@@ -371,11 +371,7 @@ pub async fn ingest(
         } else {
             title
         };
-        let published = entry
-            .published
-            .or(entry.updated)
-            .map(sqlite_time)
-            .unwrap_or_else(|| sqlite_time(Utc::now()));
+        let published = entry.published.or(entry.updated).map(sqlite_time);
 
         let raw = entry
             .content
@@ -401,9 +397,12 @@ pub async fn ingest(
             .or_else(|| crate::models::first_image(&content_html, &url));
 
         if existing.contains(&guid) {
+            // Only move a date backwards: a feed with no real date must not
+            // keep pushing old posts to the top of Recent.
             sqlx::query(
                 "UPDATE posts SET title = ?, content_html = ?, summary = ?, author = ?,
-                 thumb_url = COALESCE(thumb_url, ?)
+                 thumb_url = COALESCE(thumb_url, ?),
+                 published_at = CASE WHEN ? < published_at THEN ? ELSE published_at END
                  WHERE feed_id = ? AND guid = ?",
             )
             .bind(&display_title)
@@ -411,6 +410,8 @@ pub async fn ingest(
             .bind(&summary)
             .bind(&author)
             .bind(&thumb)
+            .bind(&published)
+            .bind(&published)
             .bind(feed_id)
             .bind(&guid)
             .execute(pool)
@@ -428,7 +429,7 @@ pub async fn ingest(
             .bind(&content_html)
             .bind(&summary)
             .bind(&thumb)
-            .bind(&published)
+            .bind(published.unwrap_or_else(|| sqlite_time(Utc::now())))
             .execute(pool)
             .await?;
             new_posts += 1;
