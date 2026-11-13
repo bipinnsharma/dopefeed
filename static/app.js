@@ -156,10 +156,32 @@
   var menuToggle = document.querySelector(".menu-toggle");
   var mobileMenu = document.getElementById("mobile-menu");
   if (menuToggle && mobileMenu) {
+    var menuAnimation;
     function setMenu(open) {
       menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
       menuToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
-      mobileMenu.hidden = !open;
+      if (menuAnimation) menuAnimation.stop();
+      if (!window.Motion || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        mobileMenu.hidden = !open;
+        return;
+      }
+      if (open) {
+        mobileMenu.hidden = false;
+        menuAnimation = window.Motion.animate(
+          mobileMenu,
+          { opacity: [0, 1], y: [-8, 0] },
+          { duration: 0.22, ease: "easeOut" }
+        );
+      } else {
+        menuAnimation = window.Motion.animate(
+          mobileMenu,
+          { opacity: [1, 0], y: [0, -8] },
+          { duration: 0.18, ease: "easeIn" }
+        );
+        menuAnimation.finished.then(function () {
+          if (menuToggle.getAttribute("aria-expanded") === "false") mobileMenu.hidden = true;
+        }).catch(function () {});
+      }
     }
     menuToggle.addEventListener("click", function () {
       setMenu(mobileMenu.hidden);

@@ -21,6 +21,11 @@ img { max-width: 100%; }
 
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
+@media (any-hover: hover) and (any-pointer: fine) {
+  body { cursor: url("/static/cursor.svg") 3 3, auto; }
+  body * { cursor: inherit; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
@@ -28,6 +33,7 @@ img { max-width: 100%; }
 .motion-pending .sidebar,
 .motion-pending .topbar,
 .motion-pending .mobile-bar,
+.motion-pending .mobile-nav,
 .motion-pending .feed-cover,
 .motion-pending .page-head,
 .motion-pending .feed-card,
@@ -1014,7 +1020,7 @@ img { max-width: 100%; }
     justify-content: space-between;
     padding-block: var(--space-4) var(--space-16);
   }
-  .mobile-menu {
+  .mobile-nav {
     position: absolute;
     top: calc(100% - var(--space-8));
     right: 0;
@@ -1028,7 +1034,7 @@ img { max-width: 100%; }
     border-radius: var(--radius-12);
     box-shadow: var(--shadow-md);
   }
-  .mobile-menu[hidden] { display: none; }
+  .mobile-nav[hidden] { display: none; }
   .mobile-link {
     padding: var(--space-8) var(--space-10);
     border-radius: var(--radius-8);
