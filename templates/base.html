@@ -42,6 +42,26 @@
   </aside>
 
   <div class="app-main">
+    <div class="mobile-bar">
+      <a class="mobile-brand" href="/" aria-label="dopefeed home">
+        <img src="/static/logo.svg" alt="" width="28" height="28">
+      </a>
+      <button type="button" class="menu-toggle" aria-controls="mobile-menu"
+              aria-expanded="false" aria-label="Open menu">
+        <svg class="menu-icon menu-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,1,0,16H40a8,8,0,0,1,0-16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/></svg>
+        <svg class="menu-icon menu-close" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+      </button>
+      <nav class="mobile-menu" id="mobile-menu" aria-label="Main" hidden>
+        <a class="mobile-link" href="/">Directory</a>
+        <a class="mobile-link" href="/my">My feed</a>
+        <a class="mobile-link" href="/websites">Websites</a>
+        <a class="mobile-link" href="/about">About</a>
+        <a class="mobile-link" href="/submit">Submit</a>
+        <a class="mobile-link" href="/links">Links</a>
+        <a class="mobile-link" href="/skills">Skills</a>
+      </nav>
+    </div>
+
     <header class="topbar">
       <div class="topbar-title">
         <span class="topbar-name">Dopefeed</span>
@@ -55,16 +75,6 @@
         {% include "_theme_toggle.html" %}
       </div>
     </header>
-
-    <nav class="mobile-nav" aria-label="Main">
-      <a class="mobile-link" href="/">Directory</a>
-      <a class="mobile-link" href="/my">My feed</a>
-      <a class="mobile-link" href="/websites">Websites</a>
-      <a class="mobile-link" href="/about">About</a>
-      <a class="mobile-link" href="/submit">Submit</a>
-      <a class="mobile-link" href="/links">Links</a>
-      <a class="mobile-link" href="/skills">Skills</a>
-    </nav>
 
     <main class="app-content">
     {% block content %}{% endblock %}

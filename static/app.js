@@ -153,6 +153,33 @@
     });
   }
 
+  var menuToggle = document.querySelector(".menu-toggle");
+  var mobileMenu = document.getElementById("mobile-menu");
+  if (menuToggle && mobileMenu) {
+    function setMenu(open) {
+      menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      menuToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      mobileMenu.hidden = !open;
+    }
+    menuToggle.addEventListener("click", function () {
+      setMenu(mobileMenu.hidden);
+    });
+    mobileMenu.addEventListener("click", function (event) {
+      if (event.target.closest("a")) setMenu(false);
+    });
+    document.addEventListener("click", function (event) {
+      if (!mobileMenu.hidden && !mobileMenu.contains(event.target) && !menuToggle.contains(event.target)) {
+        setMenu(false);
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !mobileMenu.hidden) {
+        setMenu(false);
+        menuToggle.focus();
+      }
+    });
+  }
+
   function revealLayout() {
     root.classList.remove("motion-pending");
   }
