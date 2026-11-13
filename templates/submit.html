@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Submit a feed — dopefeed{% endblock %}
 {% block content %}
-<section class="hero hero-small">
-  <h1>Submit a feed</h1>
-  <p class="hero-sub">Paste an RSS or Atom feed, a site with a feed, or a YouTube channel. It is validated and added immediately.</p>
-</section>
+<header class="page-head">
+  <h1 class="page-title">Submit a feed</h1>
+  <p class="page-sub">Paste an RSS or Atom feed, a site with a feed, or a YouTube channel. It is validated and added immediately.</p>
+</header>
 {% if let Some(error) = error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 <form class="submit-form" method="post" action="/submit">
   <label class="field">

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+{% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
@@ -36,10 +37,13 @@
         <span class="topbar-name">Dopefeed</span>
         <p class="topbar-sub">A hand-picked directory of RSS, Atom and YouTube feeds.</p>
       </div>
-      {% block search %}<form class="topbar-search" role="search" action="/" method="get">
-        <input class="search-input" type="search" name="q" placeholder="Search feeds…"
-               aria-label="Search feeds" autocomplete="off">
-      </form>{% endblock %}
+      <div class="topbar-actions">
+        {% block search %}<form class="topbar-search" role="search" action="/" method="get">
+          <input class="search-input" type="search" name="q" placeholder="Search feeds…"
+                 aria-label="Search feeds" autocomplete="off">
+        </form>{% endblock %}
+        {% include "_theme_toggle.html" %}
+      </div>
     </header>
 
     <nav class="mobile-nav" aria-label="Main">

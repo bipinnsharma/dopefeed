@@ -77,6 +77,69 @@
     }
   });
 
+  document.querySelectorAll(".chips").forEach(function (group) {
+    group.querySelectorAll(".chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        group.querySelectorAll(".chip").forEach(function (other) {
+          other.classList.remove("is-active");
+          other.removeAttribute("aria-current");
+        });
+        chip.classList.add("is-active");
+        chip.setAttribute("aria-current", "page");
+      });
+    });
+  });
+
+  var THEME_KEY = "dopefeed.theme";
+  var root = document.documentElement;
+  var darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+  function themeMode() {
+    return root.dataset.themeMode || "system";
+  }
+
+  function paintTheme() {
+    document.querySelectorAll("[data-theme-mode]").forEach(function (button) {
+      button.setAttribute("aria-pressed", button.dataset.themeMode === themeMode() ? "true" : "false");
+    });
+  }
+
+  function applyTheme() {
+    var mode = themeMode();
+    var dark = mode === "dark" || (mode === "system" && darkQuery.matches);
+    root.dataset.theme = dark ? "dark" : "light";
+    paintTheme();
+  }
+
+  function suppressTransitions(fn) {
+    var style = document.createElement("style");
+    style.textContent = "*,*::before,*::after{transition:none!important}";
+    document.head.appendChild(style);
+    fn();
+    void document.body.offsetWidth;
+    requestAnimationFrame(function () {
+      style.remove();
+    });
+  }
+
+  document.querySelectorAll("[data-theme-mode]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      root.dataset.themeMode = button.dataset.themeMode;
+      try {
+        localStorage.setItem(THEME_KEY, button.dataset.themeMode);
+      } catch (e) {
+        /* storage unavailable: theme applies for this page only */
+      }
+      suppressTransitions(applyTheme);
+    });
+  });
+
+  darkQuery.addEventListener("change", function () {
+    if (themeMode() === "system") suppressTransitions(applyTheme);
+  });
+
+  paintTheme();
+
   var timeline = document.getElementById("timeline");
   if (timeline) {
     if (subs.length === 0) {

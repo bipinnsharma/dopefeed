@@ -2,8 +2,10 @@
 {% block title %}Admin — dopefeed{% endblock %}
 {% block content %}
 <section class="admin">
-  <h1 class="page-title">Admin</h1>
-  <p class="meta admin-sub">Add or remove feeds. Changes are live immediately.</p>
+  <header class="page-head">
+    <h1 class="page-title">Admin</h1>
+    <p class="page-sub">Add or remove feeds. Changes are live immediately.</p>
+  </header>
   {% if let Some(flash) = flash %}<div class="flash">{{ flash }}</div>{% endif %}
   {% if let Some(error) = error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+{% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
@@ -12,7 +13,10 @@
 </head>
 <body class="reader-page">
 <header class="reader-bar">
-  <a class="reader-brand" href="/"><img src="/static/logo.svg" alt="" width="22" height="22">dopefeed</a>
+  <div class="reader-bar-inner">
+    <a class="reader-brand" href="/"><img src="/static/logo.svg" alt="" width="22" height="22">dopefeed</a>
+    {% include "_theme_toggle.html" %}
+  </div>
 </header>
 <main class="reader-main">
 {% block content %}{% endblock %}

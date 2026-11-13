@@ -1,0 +1,11 @@
+<script>
+(function () {
+  var mode = "system";
+  try { mode = localStorage.getItem("dopefeed.theme") || "system"; } catch (e) {}
+  if (mode !== "light" && mode !== "dark") mode = "system";
+  var dark = mode === "dark" ||
+    (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.themeMode = mode;
+})();
+</script>

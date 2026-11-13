@@ -1,6 +1,7 @@
 /* dopefeed design tokens — extracted from https://recent.design (light only).
    Hex = sRGB fallback; oklch = source of truth (wins in modern browsers). */
 :root {
+  color-scheme: light;
   --color-surface:#ffffff; --color-surface:oklch(100% 0 0);
   --color-surface-subtle:#f5f5f5; --color-surface-subtle:oklch(97% 0 0);
   --color-surface-muted:#f0f0f0; --color-surface-muted:oklch(95.5% 0 0);
@@ -43,7 +44,7 @@
   --space-12:12px; --space-16:16px; --space-20:20px; --space-24:24px;
   --space-32:32px; --space-40:40px; --space-48:48px;
 
-  --radius-2:2px; --radius-3:3px; --radius-4:4px; --radius-8:8px; --radius-10:10px;
+  --radius-2:2px; --radius-3:3px; --radius-4:4px; --radius-6:6px; --radius-8:8px; --radius-10:10px;
   --radius-12:12px; --radius-16:16px; --radius-18:18px; --radius-full:9999px;
   --radius-circle:50%;
 
@@ -59,6 +60,37 @@
   --ease-out-expo:cubic-bezier(0.16,1,0.3,1);
   --ease-standard:cubic-bezier(0.4,0,0.2,1);
   --ease-emphasized:cubic-bezier(0.2,0,0,1);
+}
+
+/* Dark theme — applied by the inline theme script in <head>. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface:#121212; --color-surface:oklch(15% 0 0);
+  --color-surface-subtle:#1c1c1c; --color-surface-subtle:oklch(19% 0 0);
+  --color-surface-muted:#232323; --color-surface-muted:oklch(22% 0 0);
+  --color-border:#2e2e2e; --color-border:oklch(100% 0 0/.12);
+  --color-ink:#f5f5f5; --color-ink:oklch(98% 0 0);
+  --color-ink-secondary:#ffffff9e; --color-ink-secondary:oklch(100% 0 0/.62);
+  --color-ink-tertiary:#ffffff61; --color-ink-tertiary:oklch(100% 0 0/.38);
+  --color-ink-inverse:#121212; --color-ink-inverse:oklch(15% 0 0);
+  --color-fill-hover:#ffffff0f; --color-fill-hover:oklch(100% 0 0/.06);
+  --color-fill-active:#ffffff1a; --color-fill-active:oklch(100% 0 0/.1);
+  --color-fill-strong:#ffffff29; --color-fill-strong:oklch(100% 0 0/.16);
+  --color-overlay:#00000099; --color-overlay:oklch(0% 0 0/.6);
+  --color-accent-strong:#ff5c22; --color-accent-strong:oklch(72% .27 48);
+  --color-success-ink:#b6ffb6; --color-success-ink:oklch(90% .14 145);
+  --color-warning-ink:#ffe58a; --color-warning-ink:oklch(90% .18 95);
+  --color-warning-surface:#2a2415; --color-warning-surface:oklch(24% .04 95);
+  --color-danger-ink:#ffb3ad; --color-danger-ink:oklch(85% .12 25);
+  --color-danger-surface:#2e1512; --color-danger-surface:oklch(26% .08 25);
+  --color-danger-border:#ff5c55; --color-danger-border:oklch(70% .25 25);
+
+  --shadow-card:0 0 0 .5px oklch(100% 0 0/.08),0 1px 2px oklch(0% 0 0/.6);
+  --shadow-sm:0 1px 2px oklch(0% 0 0/.5),0 0 0 1px oklch(100% 0 0/.06);
+  --shadow-md:0 1px 3px oklch(0% 0 0/.5),0 4px 12px oklch(0% 0 0/.4),0 0 0 1px oklch(100% 0 0/.06);
+  --shadow-lg:0 2px 5px oklch(0% 0 0/.5),0 10px 24px oklch(0% 0 0/.45),0 0 0 1px oklch(100% 0 0/.05);
+  --shadow-hairline-inset:inset 0 0 0 1px oklch(100% 0 0/.1);
+  --shadow-ring:0 0 0 2px oklch(100% 0 0/.08);
 }
 /* Breakpoints (can't be CSS vars in media queries): sm 640 · md 768 · lg 1024 · xl 1280 */
 @font-face{font-family:"Inter";src:url("/static/fonts/InterVariable.woff2") format("woff2");

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+{% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
@@ -15,12 +16,15 @@
 <header class="site-header">
   <div class="container header-inner">
     <a class="wordmark" href="/"><img class="wordmark-mark" src="/static/logo.svg" alt="" aria-hidden="true" width="24" height="24">dopefeed</a>
-    <nav class="nav" aria-label="Main">
-      <a class="nav-link" href="/">Directory</a>
-      <a class="nav-link" href="/my">My feed</a>
-      <a class="nav-link" href="/submit">Submit</a>
-      <a class="nav-link" href="/about">About</a>
-    </nav>
+    <div class="header-actions">
+      <nav class="nav" aria-label="Main">
+        <a class="nav-link" href="/">Directory</a>
+        <a class="nav-link" href="/my">My feed</a>
+        <a class="nav-link" href="/submit">Submit</a>
+        <a class="nav-link" href="/about">About</a>
+      </nav>
+      {% include "_theme_toggle.html" %}
+    </div>
   </div>
 </header>
 <main class="container">
