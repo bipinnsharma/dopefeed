@@ -3,6 +3,7 @@
   var SUBS = "dopefeed.subs";
   var READ = "dopefeed.read";
   var CAP = 5000;
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function load(key) {
     try {
@@ -160,27 +161,33 @@
     function setMenu(open) {
       menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
       menuToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
-      if (menuAnimation) menuAnimation.stop();
-      if (!window.Motion || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (menuAnimation) menuAnimation.cancel();
+      if (reduceMotion || !mobileMenu.animate) {
         mobileMenu.hidden = !open;
         return;
       }
       if (open) {
         mobileMenu.hidden = false;
-        menuAnimation = window.Motion.animate(
-          mobileMenu,
-          { opacity: [0, 1], y: [-8, 0] },
-          { duration: 0.22, ease: "easeOut" }
+        menuAnimation = mobileMenu.animate(
+          [
+            { opacity: 0, transform: "translateY(-8px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          { duration: 220, easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "both" }
         );
       } else {
-        menuAnimation = window.Motion.animate(
-          mobileMenu,
-          { opacity: [1, 0], y: [0, -8] },
-          { duration: 0.18, ease: "easeIn" }
+        menuAnimation = mobileMenu.animate(
+          [
+            { opacity: 1, transform: "translateY(0)" },
+            { opacity: 0, transform: "translateY(-8px)" },
+          ],
+          { duration: 180, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "both" }
         );
-        menuAnimation.finished.then(function () {
-          if (menuToggle.getAttribute("aria-expanded") === "false") mobileMenu.hidden = true;
-        }).catch(function () {});
+        menuAnimation.finished
+          .then(function () {
+            if (menuToggle.getAttribute("aria-expanded") === "false") mobileMenu.hidden = true;
+          })
+          .catch(function () {});
       }
     }
     menuToggle.addEventListener("click", function () {
@@ -206,27 +213,33 @@
     root.classList.remove("motion-pending");
   }
 
-  if (root.classList.contains("motion-pending") && window.Motion) {
+  if (root.classList.contains("motion-pending") && !reduceMotion && Element.prototype.animate) {
     var targets = Array.prototype.slice.call(
       document.querySelectorAll(
         ".sidebar, .topbar, .mobile-nav, .feed-cover, .page-head, " +
           ".feed-card, .post-row, .static-page, .admin-main"
       )
     );
-    try {
-      window.Motion.animate(
-        targets,
-        { opacity: [0, 1], y: [8, 0] },
+    var animations = targets.map(function (element, index) {
+      return element.animate(
+        [
+          { opacity: 0, transform: "translateY(8px)" },
+          { opacity: 1, transform: "translateY(0)" },
+        ],
         {
-          duration: 0.4,
-          ease: "easeOut",
-          delay: window.Motion.stagger(0.03),
-          onComplete: revealLayout,
+          duration: 400,
+          delay: index * 30,
+          easing: "cubic-bezier(0.2, 0, 0, 1)",
+          fill: "both",
         }
       );
-    } catch (e) {
-      revealLayout();
-    }
+    });
+    Promise.all(animations.map(function (animation) { return animation.finished; }))
+      .then(function () {
+        revealLayout();
+        animations.forEach(function (animation) { animation.cancel(); });
+      })
+      .catch(revealLayout);
   } else {
     revealLayout();
   }
