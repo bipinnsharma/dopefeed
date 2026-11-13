@@ -25,6 +25,16 @@ img { max-width: 100%; }
   * { transition: none !important; animation: none !important; }
 }
 
+.motion-pending .sidebar,
+.motion-pending .topbar,
+.motion-pending .mobile-nav,
+.motion-pending .feed-cover,
+.motion-pending .page-head,
+.motion-pending .feed-card,
+.motion-pending .post-row,
+.motion-pending .static-page,
+.motion-pending .admin-main { opacity: 0; transform: translateY(8px); }
+
 .container {
   width: 100%;
   max-width: 1100px;
@@ -49,7 +59,9 @@ img { max-width: 100%; }
   display: flex;
   flex-direction: column;
   gap: var(--space-24);
+  min-height: calc(100vh - var(--space-32));
 }
+.sidebar-footer { margin-top: auto; padding-bottom: var(--space-16); }
 .brand { display: inline-flex; width: 28px; height: 28px; }
 .brand img { width: 28px; height: 28px; }
 .side-nav { display: flex; flex-direction: column; }
@@ -358,11 +370,15 @@ img { max-width: 100%; }
               color var(--duration-base) var(--ease-standard);
 }
 .subscribe:hover { background: var(--color-fill-hover); color: var(--color-ink); }
+.subscribe-icon { width: 16px; height: 16px; }
+.subscribe-check { display: none; }
 .subscribe[aria-pressed="true"] {
   background: var(--color-ink);
   color: var(--color-ink-inverse);
   border-color: transparent;
 }
+.subscribe[aria-pressed="true"] .subscribe-plus { display: none; }
+.subscribe[aria-pressed="true"] .subscribe-check { display: block; }
 .button:active, .button-secondary:active, .subscribe:active { scale: .96; }
 
 /* Post lists */
@@ -917,10 +933,7 @@ img { max-width: 100%; }
 .empty-page { max-width: 560px; padding-block: var(--space-40) var(--space-48); }
 
 /* Footer */
-.site-footer {
-  margin-top: var(--space-48);
-  border-top: 1px solid var(--color-border);
-}
+.site-footer { margin-top: var(--space-48); }
 .footer-inner {
   display: flex;
   align-items: center;

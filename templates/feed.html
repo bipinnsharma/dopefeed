@@ -23,8 +23,7 @@
       {% if let Some(description) = feed.description %}<p class="feed-desc feed-cover-desc">{{ description }}</p>{% endif %}
       <p class="meta feed-cover-meta">{{ feed.domain }} • {{ feed.category_label() }} · {{ feed.post_count }} posts{% if let Some(label) = feed.latest_label %} · updated {{ label }}{% endif %}</p>
     </div>
-    <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"
-            aria-label="Subscribe to {{ feed.title }}" title="Subscribe">+</button>
+    {% include "_subscribe_button.html" %}
   </div>
 </header>
 {% else %}
@@ -43,8 +42,7 @@
       {% endif %}
       <h1 class="page-title">{{ feed.title }}</h1>
     </div>
-    <button type="button" class="subscribe" data-feed-id="{{ feed.id }}" aria-pressed="false"
-            aria-label="Subscribe to {{ feed.title }}" title="Subscribe">+</button>
+    {% include "_subscribe_button.html" %}
   </div>
   {% if let Some(description) = feed.description %}<p class="feed-desc">{{ description }}</p>{% endif %}
   <p class="meta">{{ feed.domain }} • {{ feed.category_label() }} · {{ feed.post_count }} posts{% if let Some(label) = feed.latest_label %} · updated {{ label }}{% endif %}</p>

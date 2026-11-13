@@ -4,12 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+<script>
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.documentElement.classList.add("motion-pending");
+    setTimeout(function () {
+      document.documentElement.classList.remove("motion-pending");
+    }, 2500);
+  }
+</script>
 {% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 {% block head %}{% endblock %}
 <script src="/static/htmx.min.js" defer></script>
+<script src="/static/motion.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -29,6 +38,7 @@
       <a class="side-link" href="/links">Links</a>
       <a class="side-link" href="/skills">Skills</a>
     </nav>
+    <p class="meta sidebar-footer">dopefeed · no accounts · no tracking</p>
   </aside>
 
   <div class="app-main">
@@ -59,17 +69,6 @@
     <main class="app-content">
     {% block content %}{% endblock %}
     </main>
-
-    <footer class="site-footer">
-      <div class="footer-inner">
-        <span class="meta">dopefeed · no accounts · no tracking</span>
-        <nav class="nav" aria-label="Footer">
-          <a class="nav-link" href="/about">About</a>
-          <a class="nav-link" href="/terms">Terms</a>
-          <a class="nav-link" href="/privacy">Privacy</a>
-        </nav>
-      </div>
-    </footer>
   </div>
 </div>
 </body>

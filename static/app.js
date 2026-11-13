@@ -29,7 +29,6 @@
     function paint() {
       var on = subs.indexOf(id) !== -1;
       button.setAttribute("aria-pressed", on ? "true" : "false");
-      button.textContent = on ? "\u2713" : "+";
     }
     paint();
     button.addEventListener("click", function () {
@@ -152,6 +151,35 @@
         /* storage unavailable: font applies for this page only */
       }
     });
+  }
+
+  function revealLayout() {
+    root.classList.remove("motion-pending");
+  }
+
+  if (root.classList.contains("motion-pending") && window.Motion) {
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll(
+        ".sidebar, .topbar, .mobile-nav, .feed-cover, .page-head, " +
+          ".feed-card, .post-row, .static-page, .admin-main"
+      )
+    );
+    try {
+      window.Motion.animate(
+        targets,
+        { opacity: [0, 1], y: [8, 0] },
+        {
+          duration: 0.4,
+          ease: "easeOut",
+          delay: window.Motion.stagger(0.03),
+          onComplete: revealLayout,
+        }
+      );
+    } catch (e) {
+      revealLayout();
+    }
+  } else {
+    revealLayout();
   }
 
   var timeline = document.getElementById("timeline");
