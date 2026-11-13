@@ -927,6 +927,7 @@ fn youtube_guid_extracts_embed_id() {
         author: None,
         summary: String::new(),
         content_html: String::new(),
+        thumb_url: None,
         published_label: "Jan 01, 2025".into(),
     };
     assert_eq!(post.youtube_id(), Some("dQw4w9WgXcQ"));
@@ -945,6 +946,7 @@ fn post_cover_image_uses_body_image_then_youtube_thumbnail() {
         author: None,
         summary: String::new(),
         content_html: String::new(),
+        thumb_url: None,
         published_label: "2025-01-01".into(),
     };
     assert!(post.is_stub());
@@ -990,14 +992,22 @@ fn youtube_thumb_is_derived_from_guid() {
         author: None,
         summary: String::new(),
         content_html: String::new(),
+        thumb_url: None,
         published_label: "2025-01-01".into(),
     };
     assert_eq!(
-        post.youtube_thumb().as_deref(),
+        post.thumb().as_deref(),
         Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg")
     );
+    // A cached local poster wins over the derived remote URL.
+    post.thumb_url = Some("/static/assets/posts/abc.jpg".into());
+    assert_eq!(
+        post.thumb().as_deref(),
+        Some("/static/assets/posts/abc.jpg")
+    );
     post.guid = "guid".into();
-    assert!(post.youtube_thumb().is_none());
+    post.thumb_url = None;
+    assert!(post.thumb().is_none());
 }
 
 #[test]
@@ -1085,4 +1095,127 @@ async fn feed_page_renders_youtube_thumbnail() {
         .unwrap();
     assert!(html.contains("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg"));
     assert!(html.contains(r#"width="96" height="54""#));
+}
+
+#[tokio::test]
+async fn remote_images_are_cached_once_and_rewritten() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/thumb.jpg"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/jpeg")
+                .set_body_bytes(b"\xff\xd8\xff\xe0not-a-real-jpeg".to_vec()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = std::env::temp_dir().join(format!("dopefeed-assets-{}", std::process::id()));
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    let original = format!("{}/thumb.jpg", server.uri());
+    sqlx::query("UPDATE posts SET thumb_url = ? WHERE feed_id = ?")
+        .bind(&original)
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    add_post(&state.pool, id, "guid", "A post", "2025-01-01 00:00:00").await;
+    sqlx::query("UPDATE posts SET thumb_url = ? WHERE guid = 'guid'")
+        .bind(&original)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    crate::assets::localize_post_thumbs(&state.pool, &state.http, &dir, id).await;
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT thumb_url FROM posts WHERE guid = 'guid'")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    let stored = stored.unwrap();
+    assert!(stored.starts_with("/static/assets/posts/"), "{stored}");
+    assert!(stored.ends_with(".jpg"));
+
+    // Second pass must reuse the file instead of calling the source again.
+    crate::assets::localize_post_thumbs(&state.pool, &state.http, &dir, id).await;
+    let local = dir.join("posts").join(stored.rsplit('/').next().unwrap());
+    assert!(tokio::fs::metadata(&local).await.is_ok());
+}
+
+#[test]
+fn channel_videos_are_lifted_from_the_page() {
+    let html = r#"<script>var ytInitialData = {"contents":[
+      {"lockupViewModel":{"contentId":"dQw4w9WgXcQ","metadata":{"lockupMetadataViewModel":{
+        "title":{"content":"A video"},
+        "metadata":{"contentMetadataViewModel":{"metadataRows":[{"metadataParts":[
+          {"text":{"content":"115k"}},{"text":{"content":"3 days ago"}}]}]}}}}}},
+      {"lockupViewModel":{"contentId":"dQw4w9WgXcQ","metadata":{"lockupMetadataViewModel":{
+        "title":{"content":"Duplicate"}}}}}
+    ]};</script>"#;
+    let videos = crate::worker::discover::extract_channel_videos(html);
+    assert_eq!(videos.len(), 1);
+    assert_eq!(videos[0].id, "dQw4w9WgXcQ");
+    assert_eq!(videos[0].title, "A video");
+    let age = chrono::Utc::now() - videos[0].published.unwrap();
+    assert!((age.num_hours() - 72).abs() <= 1);
+}
+
+#[test]
+fn og_image_prefers_the_social_preview_and_resolves_relative_urls() {
+    let base = url::Url::parse("https://example.com/posts/one").unwrap();
+    let html = r#"<meta property="og:image" content="/cover.png">
+                  <meta name="twitter:image" content="https://cdn.example.com/t.png">"#;
+    assert_eq!(
+        crate::worker::discover::extract_og_image(html, &base).as_deref(),
+        Some("https://example.com/cover.png")
+    );
+    assert_eq!(
+        crate::worker::discover::extract_og_image("<p>no image</p>", &base),
+        None
+    );
+}
+
+#[tokio::test]
+async fn body_image_fills_a_missing_thumb() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/hero.png"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/png")
+                .set_body_bytes(b"\x89PNG\r\n\x1a\nnot-a-real-png".to_vec()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = std::env::temp_dir().join(format!("dopefeed-body-thumb-{}", std::process::id()));
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    add_post(&state.pool, id, "guid", "A post", "2025-01-01 00:00:00").await;
+    sqlx::query(
+        "UPDATE posts SET content_html = ?, url = 'https://example.com/post', thumb_url = NULL
+         WHERE guid = 'guid'",
+    )
+    .bind(format!(r#"<p><img src="{}/hero.png"></p>"#, server.uri()))
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    crate::assets::localize_post_thumbs(&state.pool, &state.http, &dir, id).await;
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT thumb_url FROM posts WHERE guid = 'guid'")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert!(
+        stored
+            .as_deref()
+            .is_some_and(|value| value.starts_with("/static/assets/posts/")),
+        "{stored:?}"
+    );
 }

@@ -20,13 +20,13 @@
   {% else %}
   {% if let Some(cover) = cover %}
   <figure class="reader-cover">
-    <img src="{{ cover }}" alt="" loading="eager">
+    <img src="{{ cover }}" alt="" loading="eager"
+         onerror="this.src='/static/no-image-dl.jpg'">
   </figure>
   {% else %}
   {% if !post.is_stub() %}
   <div class="reader-cover reader-cover-fallback">
-    <img src="https://www.google.com/s2/favicons?domain={{ post.feed_domain }}&amp;sz=128"
-         alt="" width="64" height="64" loading="lazy">
+    <img src="/static/no-image-dl.jpg" alt="" width="64" height="64" loading="lazy">
   </div>
   {% endif %}
   {% endif %}

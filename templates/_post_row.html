@@ -1,13 +1,8 @@
 <a class="post-row" href="/read/{{ post.id }}" data-post-id="{{ post.id }}">
-  {% if let Some(thumb) = post.youtube_thumb() %}
   <span class="post-thumb">
-    <svg class="post-thumb-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M9 6.5v11l9-5.5-9-5.5Z"/>
-    </svg>
-    <img src="{{ thumb }}" alt="" width="96" height="54" loading="lazy"
-         onerror="this.remove()">
+    <img src="{{ post.thumb_or_placeholder() }}" alt="" width="96" height="54" loading="lazy"
+         onerror="this.src='/static/no-image-dl.jpg'">
   </span>
-  {% endif %}
   <div class="post-row-text">
     <h2 class="post-title">{{ post.title }}</h2>
     <p class="post-summary">{{ post.summary }}</p>

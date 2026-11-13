@@ -1,12 +1,8 @@
 <article class="feed-card">
   <div class="feed-card-head">
-    {% if let Some(avatar) = feed.avatar_url %}
-    <img class="feed-icon feed-avatar" src="{{ avatar }}" alt="{{ feed.title }}"
-         width="48" height="48" loading="lazy">
-    {% else %}
-    <img class="feed-icon" src="https://www.google.com/s2/favicons?domain={{ feed.domain }}&amp;sz=64"
-         alt="" width="32" height="32" loading="lazy">
-    {% endif %}
+    <img class="feed-icon feed-avatar" src="{{ feed.avatar_url.as_deref().unwrap_or("/static/no-image-dl.jpg") }}"
+         alt="{{ feed.title }}" width="48" height="48" loading="lazy"
+         onerror="this.src='/static/no-image-dl.jpg'">
     <div class="feed-card-text">
       <h2 class="feed-card-title"><a href="/f/{{ feed.id }}">{{ feed.title }}</a></h2>
       <p class="feed-card-category">{{ feed.category_label() }}</p>

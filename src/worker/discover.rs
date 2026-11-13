@@ -1,4 +1,5 @@
 use super::ssrf;
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use reqwest::{
     Client,
     header::{COOKIE, ETAG, HeaderMap, HeaderValue, LAST_MODIFIED, USER_AGENT},
@@ -340,6 +341,17 @@ async fn resolve_youtube(client: &Client, input: &Url) -> Result<Resolved, Strin
             tokio::time::sleep(std::time::Duration::from_millis(700)).await;
         }
     }
+    // The RSS service can be down while the channel page is fine; synthesize a
+    // feed from `/videos` rather than failing the submission.
+    if let Some(feed) = fetch_channel_videos(client, &channel_id).await {
+        let mut resolved = build(url, feed, HeaderMap::new(), input, true);
+        if let Some(images) = &images {
+            resolved.avatar_url = images.avatar.clone();
+            resolved.banner_url = images.banner.clone();
+            resolved.images_fetched = true;
+        }
+        return Ok(resolved);
+    }
     match last_status {
         Some(status) => Err(format!(
             "That YouTube channel's feed returned HTTP {}.",
@@ -409,6 +421,195 @@ pub fn extract_channel_images(html: &str) -> ChannelImages {
         avatar: avatar.as_deref().and_then(safe_image_url),
         banner: banner.as_deref().and_then(safe_image_url),
     }
+}
+
+/// The site's own social-preview image, used as the feed's cover. Resolved
+/// against the page it came from (final URL after redirects).
+pub fn extract_og_image(html: &str, base: &Url) -> Option<String> {
+    let selector = Selector::parse(
+        "meta[property='og:image'], meta[name='og:image'], \
+         meta[name='twitter:image'], meta[property='twitter:image']",
+    )
+    .ok()?;
+    let document = Html::parse_document(html);
+    document
+        .select(&selector)
+        .filter_map(|element| element.value().attr("content"))
+        .find_map(|content| {
+            let url = base.join(content.trim()).ok()?;
+            matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+        })
+}
+
+/// One video lifted from a channel's `/videos` page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelVideo {
+    pub id: String,
+    pub title: String,
+    pub published: Option<DateTime<Utc>>,
+}
+
+/// Fallback for when the channel's RSS feed is down: the `/videos` page is a
+/// separate service and usually keeps working. Best-effort, `None` on failure.
+pub async fn fetch_channel_videos(
+    client: &Client,
+    channel_id: &str,
+) -> Option<feed_rs::model::Feed> {
+    let url = Url::parse(&format!(
+        "https://www.youtube.com/channel/{channel_id}/videos"
+    ))
+    .ok()?;
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static(YOUTUBE_DESKTOP_UA));
+    headers.insert(COOKIE, HeaderValue::from_static(YOUTUBE_COOKIE));
+    let fetched = ssrf::get(client, &url, &headers).await.ok()?;
+    if !fetched.status.is_success() {
+        return None;
+    }
+    let html = std::str::from_utf8(&fetched.body).ok()?;
+    let videos = extract_channel_videos(html);
+    if videos.is_empty() {
+        return None;
+    }
+    let title = page_title(html).unwrap_or_else(|| "YouTube".to_string());
+    parse_feed(&channel_video_feed(channel_id, &title, &videos))
+}
+
+/// The channel name as the page's social title.
+fn page_title(html: &str) -> Option<String> {
+    let selector = Selector::parse("meta[property='og:title']").ok()?;
+    let document = Html::parse_document(html);
+    document
+        .select(&selector)
+        .next()?
+        .value()
+        .attr("content")
+        .map(|content| content.trim().to_string())
+        .filter(|title| !title.is_empty())
+}
+
+pub fn extract_channel_videos(html: &str) -> Vec<ChannelVideo> {
+    let Some(data) = initial_data(html) else {
+        return Vec::new();
+    };
+    let mut videos = Vec::new();
+    collect_channel_videos(&data, &mut videos);
+    let mut seen = std::collections::HashSet::new();
+    videos.retain(|video| seen.insert(video.id.clone()));
+    videos
+}
+
+fn collect_channel_videos(value: &serde_json::Value, out: &mut Vec<ChannelVideo>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(video) = map.get("lockupViewModel").and_then(channel_video) {
+                out.push(video);
+            }
+            for child in map.values() {
+                collect_channel_videos(child, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_channel_videos(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn channel_video(lockup: &serde_json::Value) -> Option<ChannelVideo> {
+    let id = lockup.get("contentId")?.as_str()?;
+    if id.len() != 11 || !id.chars().all(is_channel_char) {
+        return None;
+    }
+    let title = lockup
+        .pointer("/metadata/lockupMetadataViewModel/title/content")?
+        .as_str()?
+        .trim();
+    if title.is_empty() {
+        return None;
+    }
+    let published = find_relative_time(lockup)
+        .and_then(|text| relative_seconds(&text))
+        .map(|seconds| Utc::now() - Duration::seconds(seconds));
+    Some(ChannelVideo {
+        id: id.to_string(),
+        title: title.to_string(),
+        published,
+    })
+}
+
+fn find_relative_time(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map
+                .get("text")
+                .and_then(|text| text.get("content"))
+                .and_then(serde_json::Value::as_str)
+                && relative_seconds(text).is_some()
+            {
+                return Some(text.to_string());
+            }
+            map.values().find_map(find_relative_time)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(find_relative_time),
+        _ => None,
+    }
+}
+
+/// "3 days ago" / "Streamed 2 weeks ago" → seconds before now.
+fn relative_seconds(text: &str) -> Option<i64> {
+    let text = text.trim();
+    let text = text
+        .strip_prefix("Streamed ")
+        .or_else(|| text.strip_prefix("Premiered "))
+        .unwrap_or(text);
+    let mut parts = text.strip_suffix(" ago")?.split_whitespace();
+    let count: i64 = parts.next()?.parse().ok()?;
+    let unit = parts.next()?.trim_end_matches('s');
+    let seconds = match unit {
+        "second" => 1,
+        "minute" => 60,
+        "hour" => 3600,
+        "day" => 86_400,
+        "week" => 604_800,
+        "month" => 2_592_000,
+        "year" => 31_536_000,
+        _ => return None,
+    };
+    Some(count * seconds)
+}
+
+/// Atom document shaped like the RSS endpoint's, so `parse_feed` and `ingest`
+/// handle both identically.
+fn channel_video_feed(channel_id: &str, channel_title: &str, videos: &[ChannelVideo]) -> Vec<u8> {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\">",
+    );
+    xml.push_str(&format!(
+        "<id>channel:{channel_id}</id><title>{}</title><updated>{}</updated>",
+        xml_escape(channel_title),
+        Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+    ));
+    for video in videos {
+        xml.push_str("<entry>");
+        xml.push_str(&format!("<id>yt:video:{}</id>", video.id));
+        xml.push_str(&format!("<title>{}</title>", xml_escape(&video.title)));
+        xml.push_str(&format!(
+            "<link rel=\"alternate\" href=\"https://www.youtube.com/watch?v={}\"/>",
+            video.id
+        ));
+        if let Some(published) = video.published {
+            xml.push_str(&format!(
+                "<published>{}</published>",
+                published.to_rfc3339_opts(SecondsFormat::Secs, true)
+            ));
+        }
+        xml.push_str("</entry>");
+    }
+    xml.push_str("</feed>");
+    xml.into_bytes()
 }
 
 /// The channel id embedded in a YouTube RSS feed URL.
@@ -696,4 +897,28 @@ fn alternates(html: &str, base: &Url) -> Vec<Url> {
 
 fn is_channel_id(value: &str) -> bool {
     value.starts_with("UC") && value.len() == 24 && value.chars().all(is_channel_char)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChannelVideo, channel_video_feed, parse_feed};
+    use chrono::Utc;
+
+    #[test]
+    fn synthesized_channel_feed_parses_like_rss() {
+        let videos = vec![ChannelVideo {
+            id: "dQw4w9WgXcQ".into(),
+            title: "A & B".into(),
+            published: Some(Utc::now()),
+        }];
+        let feed = parse_feed(&channel_video_feed(
+            "UCfQx-K9zBExhMLfKQmXBxJg",
+            "Sam & Victor",
+            &videos,
+        ))
+        .expect("synthesized atom must parse");
+        assert_eq!(feed.entries.len(), 1);
+        assert_eq!(feed.entries[0].id, "yt:video:dQw4w9WgXcQ");
+        assert_eq!(feed.entries[0].title.as_ref().unwrap().content, "A & B");
+    }
 }

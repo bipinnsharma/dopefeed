@@ -71,7 +71,7 @@ pub async fn read(State(state): State<AppState>, Path(id): Path<i64>) -> AppResu
     .ok_or(AppError::NotFound)?;
 
     let youtube_id = post.youtube_id().map(str::to_string);
-    let cover = post.cover_image();
+    let cover = post.reader_cover();
     Ok(Html(
         ReaderTemplate {
             post,

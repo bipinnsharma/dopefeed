@@ -66,18 +66,49 @@ pub struct Post {
     pub author: Option<String>,
     pub summary: String,
     pub content_html: String,
+    pub thumb_url: Option<String>,
     pub published_label: String,
 }
 
-impl Post {
-    /// YouTube entries carry a `yt:video:<id>` guid; used for the privacy embed.
-    pub fn youtube_id(&self) -> Option<&str> {
-        self.guid.strip_prefix("yt:video:").filter(|id| {
-            !id.is_empty()
-                && id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+pub const PLACEHOLDER_IMAGE: &str = "/static/no-image-dl.jpg";
+
+/// YouTube entries carry a `yt:video:<id>` guid.
+pub fn youtube_video_id(guid: &str) -> Option<&str> {
+    guid.strip_prefix("yt:video:").filter(|id| {
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    })
+}
+
+/// 16:9 poster for a YouTube video, derived from the guid.
+pub fn youtube_thumb(guid: &str) -> Option<String> {
+    youtube_video_id(guid).map(|id| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
+}
+
+/// First http(s) image in an article body, resolved against its page URL.
+pub fn first_image(html: &str, page_url: &str) -> Option<String> {
+    let document = scraper::Html::parse_fragment(html);
+    let selector = scraper::Selector::parse("img[src]").ok()?;
+    let base = url::Url::parse(page_url).ok();
+    document
+        .select(&selector)
+        .filter_map(|element| element.value().attr("src"))
+        .find_map(|src| {
+            let src = src.trim();
+            let url = base
+                .as_ref()
+                .and_then(|base| base.join(src).ok())
+                .or_else(|| url::Url::parse(src).ok())?;
+            matches!(url.scheme(), "http" | "https").then(|| url.to_string())
         })
+}
+
+impl Post {
+    /// YouTube id, used for the privacy embed.
+    pub fn youtube_id(&self) -> Option<&str> {
+        youtube_video_id(&self.guid)
     }
 
     /// Feeds that only publish a link/summary have no readable article body.
@@ -85,10 +116,15 @@ impl Post {
         self.content_html.trim().is_empty()
     }
 
-    /// 16:9 card thumbnail derived from the guid — no fetch, no DB column.
-    pub fn youtube_thumb(&self) -> Option<String> {
-        self.youtube_id()
-            .map(|id| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
+    /// The image the list row shows: the locally cached one once downloaded.
+    pub fn thumb(&self) -> Option<String> {
+        self.thumb_url.clone().or_else(|| youtube_thumb(&self.guid))
+    }
+
+    /// The row always has a thumb slot, so a missing poster must not collapse it.
+    pub fn thumb_or_placeholder(&self) -> String {
+        self.thumb()
+            .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
     }
 
     /// First image in the entry (its usual OG/hero image), else the YouTube
@@ -97,20 +133,18 @@ impl Post {
         if let Some(id) = self.youtube_id() {
             return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
         }
-        let document = scraper::Html::parse_fragment(&self.content_html);
-        let selector = scraper::Selector::parse("img[src]").ok()?;
-        let base = url::Url::parse(&self.url).ok();
-        document
-            .select(&selector)
-            .filter_map(|element| element.value().attr("src"))
-            .find_map(|src| {
-                let src = src.trim();
-                let url = base
-                    .as_ref()
-                    .and_then(|base| base.join(src).ok())
-                    .or_else(|| url::Url::parse(src).ok())?;
-                matches!(url.scheme(), "http" | "https").then(|| url.to_string())
-            })
+        first_image(&self.content_html, &self.url)
+    }
+
+    /// Reader cover: the cached copy for blog posts, the sharper remote poster
+    /// for YouTube.
+    pub fn reader_cover(&self) -> Option<String> {
+        if self.youtube_id().is_none()
+            && let Some(local) = &self.thumb_url
+        {
+            return Some(local.clone());
+        }
+        self.cover_image()
     }
 }
 

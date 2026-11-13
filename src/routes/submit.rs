@@ -202,6 +202,10 @@ pub async fn insert_resolved(
     let images_fetched_at = resolved
         .images_fetched
         .then(|| chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
+    let avatar_url =
+        crate::assets::cache_or_keep(&state.http, resolved.avatar_url.clone(), "feeds").await;
+    let banner_url =
+        crate::assets::cache_or_keep(&state.http, resolved.banner_url.clone(), "feeds").await;
 
     let result = sqlx::query(
         "INSERT INTO feeds (url, site_url, domain, title, description, category, status,
@@ -214,8 +218,8 @@ pub async fn insert_resolved(
     .bind(&title)
     .bind(resolved.description.clone())
     .bind(category)
-    .bind(resolved.avatar_url.clone())
-    .bind(resolved.banner_url.clone())
+    .bind(avatar_url)
+    .bind(banner_url)
     .bind(images_fetched_at)
     .bind(etag)
     .bind(last_modified)
@@ -223,6 +227,13 @@ pub async fn insert_resolved(
     .await?;
     let id = result.last_insert_rowid();
     worker::fetch::ingest(&state.pool, id, &resolved.feed, &resolved.site_url).await?;
+    crate::assets::localize_post_thumbs(
+        &state.pool,
+        &state.http,
+        std::path::Path::new(crate::assets::DIR),
+        id,
+    )
+    .await;
     Ok(Some(id))
 }
 

@@ -46,9 +46,19 @@ pub fn sqlite_time(time: DateTime<Utc>) -> String {
 /// Fetches one feed and persists the result. Fetch/parse failures update backoff
 /// instead of returning an error; only database failures bubble up.
 pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
-    if feed.category == "youtube" && feed.images_fetched_at.is_none() {
+    if feed.category == "youtube" {
         backfill_channel_images(state, feed).await?;
+    } else {
+        backfill_site_cover(state, feed).await?;
     }
+    // Runs even when the feed fetch fails, so cached posters survive an outage.
+    crate::assets::localize_post_thumbs(
+        &state.pool,
+        &state.http,
+        std::path::Path::new(crate::assets::DIR),
+        feed.id,
+    )
+    .await;
 
     let url = Url::parse(&feed.url).map_err(|e| anyhow!("bad feed url: {e}"))?;
     let mut headers = HeaderMap::new();
@@ -66,7 +76,9 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
     let fetched = match ssrf::get(&state.http, &url, &headers).await {
         Ok(fetched) => fetched,
         Err(error) => {
-            record_failure(state, feed, &error).await?;
+            if !fallback_to_channel_page(state, feed).await? {
+                record_failure(state, feed, &error).await?;
+            }
             return Ok(());
         }
     };
@@ -76,11 +88,16 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
         return Ok(());
     }
     if !fetched.status.is_success() {
-        record_failure(state, feed, &format!("HTTP {}", fetched.status.as_u16())).await?;
+        if !fallback_to_channel_page(state, feed).await? {
+            record_failure(state, feed, &format!("HTTP {}", fetched.status.as_u16())).await?;
+        }
         return Ok(());
     }
 
     let Some(parsed) = discover::parse_feed(&fetched.body) else {
+        if fallback_to_channel_page(state, feed).await? {
+            return Ok(());
+        }
         return retry_discovery(state, feed).await;
     };
 
@@ -107,20 +124,76 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
 }
 
 /// Fetches the channel page once to learn the avatar/banner. The marker column
-/// means channels without artwork are not refetched on every refresh.
+/// means channels without artwork are not refetched on every refresh. Also
+/// rewrites an already-fetched remote avatar/banner to a local copy.
 async fn backfill_channel_images(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
-    let Some(channel_id) = discover::channel_id_from_feed_url(&feed.url) else {
-        return Ok(());
-    };
-    let Some(images) = discover::fetch_channel_images(&state.http, &channel_id).await else {
-        return Ok(());
-    };
-    sqlx::query(
-        "UPDATE feeds SET avatar_url = COALESCE(?, avatar_url),
-         banner_url = COALESCE(?, banner_url), images_fetched_at = ? WHERE id = ?",
+    if feed.images_fetched_at.is_none()
+        && let Some(channel_id) = discover::channel_id_from_feed_url(&feed.url)
+        && let Some(images) = discover::fetch_channel_images(&state.http, &channel_id).await
+    {
+        sqlx::query(
+            "UPDATE feeds SET avatar_url = COALESCE(?, avatar_url),
+             banner_url = COALESCE(?, banner_url), images_fetched_at = ? WHERE id = ?",
+        )
+        .bind(images.avatar)
+        .bind(images.banner)
+        .bind(sqlite_time(Utc::now()))
+        .bind(feed.id)
+        .execute(&state.pool)
+        .await?;
+    }
+    crate::assets::localize_feed_images(
+        &state.pool,
+        &state.http,
+        std::path::Path::new(crate::assets::DIR),
+        feed.id,
     )
-    .bind(images.avatar)
-    .bind(images.banner)
+    .await;
+    Ok(())
+}
+
+/// YouTube's RSS endpoint is a separate service from the channel page. When it
+/// is down, ingest the page's video list so posts still arrive.
+async fn fallback_to_channel_page(state: &AppState, feed: &DueFeed) -> anyhow::Result<bool> {
+    if feed.category != "youtube" {
+        return Ok(false);
+    }
+    let Some(channel_id) = discover::channel_id_from_feed_url(&feed.url) else {
+        return Ok(false);
+    };
+    let Some(parsed) = discover::fetch_channel_videos(&state.http, &channel_id).await else {
+        return Ok(false);
+    };
+    let new = ingest(&state.pool, feed.id, &parsed, &feed.site_url).await?;
+    // A synthesized feed has no HTTP validators to cache.
+    succeed(state, feed, new, &HeaderMap::new()).await?;
+    Ok(true)
+}
+
+/// Non-YouTube feeds use the site's og:image as their cover. Marker column
+/// stops a site without one from being refetched on every tick.
+async fn backfill_site_cover(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
+    if feed.images_fetched_at.is_some() {
+        return Ok(());
+    }
+    let Ok(url) = Url::parse(&feed.site_url) else {
+        return Ok(());
+    };
+    // A failed fetch must not set the marker, so the cover is retried later.
+    let Ok(fetched) = ssrf::get(&state.http, &url, &HeaderMap::new()).await else {
+        return Ok(());
+    };
+    if !fetched.status.is_success() {
+        return Ok(());
+    }
+    let image = std::str::from_utf8(&fetched.body)
+        .ok()
+        .and_then(|html| discover::extract_og_image(html, &fetched.final_url));
+    let local = crate::assets::cache_or_keep(&state.http, image, "feeds").await;
+    sqlx::query(
+        "UPDATE feeds SET banner_url = COALESCE(banner_url, ?), images_fetched_at = ? WHERE id = ?",
+    )
+    .bind(local)
     .bind(sqlite_time(Utc::now()))
     .bind(feed.id)
     .execute(&state.pool)
@@ -216,6 +289,14 @@ async fn succeed(
     .bind(feed.id)
     .execute(&state.pool)
     .await?;
+    // New posts were inserted after the start-of-refresh pass.
+    crate::assets::localize_post_thumbs(
+        &state.pool,
+        &state.http,
+        std::path::Path::new(crate::assets::DIR),
+        feed.id,
+    )
+    .await;
     Ok(())
 }
 
@@ -312,16 +393,21 @@ pub async fn ingest(
                 .filter(|n| !n.trim().is_empty())
                 .or_else(|| p.email.clone())
         });
+        // Stored remote first, then rewritten by assets::localize_post_thumbs.
+        let thumb = crate::models::youtube_thumb(&guid)
+            .or_else(|| crate::models::first_image(&content_html, &url));
 
         if existing.contains(&guid) {
             sqlx::query(
-                "UPDATE posts SET title = ?, content_html = ?, summary = ?, author = ?
+                "UPDATE posts SET title = ?, content_html = ?, summary = ?, author = ?,
+                 thumb_url = COALESCE(thumb_url, ?)
                  WHERE feed_id = ? AND guid = ?",
             )
             .bind(&display_title)
             .bind(&content_html)
             .bind(&summary)
             .bind(&author)
+            .bind(&thumb)
             .bind(feed_id)
             .bind(&guid)
             .execute(pool)
@@ -329,7 +415,7 @@ pub async fn ingest(
         } else {
             sqlx::query(
                 "INSERT INTO posts (feed_id, guid, url, title, author, content_html, summary,
-                 published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 thumb_url, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(feed_id)
             .bind(&guid)
@@ -338,6 +424,7 @@ pub async fn ingest(
             .bind(&author)
             .bind(&content_html)
             .bind(&summary)
+            .bind(&thumb)
             .bind(&published)
             .execute(pool)
             .await?;
