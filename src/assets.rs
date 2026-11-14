@@ -23,7 +23,7 @@ pub async fn cache_in(dir: &Path, client: &Client, url: &str, kind: &str) -> Opt
     }
     let digest = Sha256::digest(url.as_bytes());
     let stem: String = digest.iter().take(12).map(|b| format!("{b:02x}")).collect();
-    for ext in ["jpg", "png", "webp", "gif", "avif"] {
+    for ext in ["jpg", "png", "webp", "gif", "avif", "ico"] {
         if tokio::fs::metadata(dir.join(kind).join(format!("{stem}.{ext}")))
             .await
             .is_ok()
@@ -63,6 +63,7 @@ fn image_ext(content_type: &str) -> Option<&'static str> {
         "image/webp" => Some("webp"),
         "image/gif" => Some("gif"),
         "image/avif" => Some("avif"),
+        "image/x-icon" | "image/vnd.microsoft.icon" => Some("ico"),
         _ => None,
     }
 }
@@ -180,6 +181,7 @@ mod tests {
     fn only_inert_image_types_are_cached() {
         assert_eq!(image_ext("image/jpeg; charset=binary"), Some("jpg"));
         assert_eq!(image_ext("IMAGE/PNG"), Some("png"));
+        assert_eq!(image_ext("image/x-icon"), Some("ico"));
         assert_eq!(image_ext("image/svg+xml"), None);
         assert_eq!(image_ext("text/html"), None);
     }

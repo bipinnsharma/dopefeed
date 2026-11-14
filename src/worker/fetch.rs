@@ -26,6 +26,8 @@ pub struct DueFeed {
     pub domain: String,
     pub category: String,
     pub images_fetched_at: Option<String>,
+    pub avatar_url: Option<String>,
+    pub favicon_fetched_at: Option<String>,
 }
 
 pub fn http_client(base_url: &str) -> anyhow::Result<Client> {
@@ -49,7 +51,7 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
     if feed.category == "youtube" {
         backfill_channel_images(state, feed).await?;
     } else {
-        backfill_site_cover(state, feed).await?;
+        backfill_site_images(state, feed).await?;
     }
     // Runs even when the feed fetch fails, so cached posters survive an outage.
     crate::assets::localize_post_thumbs(
@@ -170,34 +172,69 @@ async fn fallback_to_channel_page(state: &AppState, feed: &DueFeed) -> anyhow::R
     Ok(true)
 }
 
-/// Non-YouTube feeds use the site's og:image as their cover. Marker column
-/// stops a site without one from being refetched on every tick.
-async fn backfill_site_cover(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
-    if feed.images_fetched_at.is_some() {
+/// Non-YouTube feeds use the site's og:image as their cover and its icon as
+/// their avatar. One page fetch fills whichever is missing; each marker column
+/// stops a site without that image from being refetched on every tick.
+async fn backfill_site_images(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
+    let need_cover = feed.images_fetched_at.is_none();
+    let need_icon = feed.avatar_url.as_deref().unwrap_or_default().is_empty()
+        && feed.favicon_fetched_at.is_none();
+    if !need_cover && !need_icon {
         return Ok(());
     }
     let Ok(url) = Url::parse(&feed.site_url) else {
         return Ok(());
     };
-    // A failed fetch must not set the marker, so the cover is retried later.
+    // A failed fetch must not set the markers, so both are retried later.
     let Ok(fetched) = ssrf::get(&state.http, &url, &HeaderMap::new()).await else {
         return Ok(());
     };
     if !fetched.status.is_success() {
         return Ok(());
     }
-    let image = std::str::from_utf8(&fetched.body)
-        .ok()
-        .and_then(|html| discover::extract_og_image(html, &fetched.final_url));
-    let local = crate::assets::cache_or_keep(&state.http, image, "feeds").await;
-    // A remote URL that could not be cached is likely dead (an expired CDN
-    // preview); no cover beats a broken one.
-    let local = local.filter(|url| !url.starts_with("http"));
+    let html = std::str::from_utf8(&fetched.body).ok();
+
+    let banner = if need_cover {
+        let image = html.and_then(|html| discover::extract_og_image(html, &fetched.final_url));
+        // A remote URL that could not be cached is likely dead (an expired CDN
+        // preview); no cover beats a broken one.
+        crate::assets::cache_or_keep(&state.http, image, "feeds")
+            .await
+            .filter(|url| !url.starts_with("http"))
+    } else {
+        None
+    };
+
+    let avatar = if need_icon {
+        let mut local = None;
+        for candidate in html
+            .map(|html| discover::extract_icons(html, &fetched.final_url))
+            .unwrap_or_default()
+        {
+            if let Some(path) =
+                crate::assets::cache_or_keep(&state.http, Some(candidate), "feeds").await
+                && !path.starts_with("http")
+            {
+                local = Some(path);
+                break;
+            }
+        }
+        local
+    } else {
+        None
+    };
+
+    let now = sqlite_time(Utc::now());
     sqlx::query(
-        "UPDATE feeds SET banner_url = COALESCE(banner_url, ?), images_fetched_at = ? WHERE id = ?",
+        "UPDATE feeds SET banner_url = COALESCE(banner_url, ?),
+         images_fetched_at = COALESCE(images_fetched_at, ?),
+         avatar_url = COALESCE(avatar_url, ?),
+         favicon_fetched_at = COALESCE(favicon_fetched_at, ?) WHERE id = ?",
     )
-    .bind(local)
-    .bind(sqlite_time(Utc::now()))
+    .bind(banner)
+    .bind(need_cover.then(|| now.clone()))
+    .bind(avatar)
+    .bind(need_icon.then_some(now))
     .bind(feed.id)
     .execute(&state.pool)
     .await?;

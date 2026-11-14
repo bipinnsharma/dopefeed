@@ -24,7 +24,7 @@ pub fn spawn(state: AppState) {
 async fn run_tick(state: &AppState) -> anyhow::Result<()> {
     let due = sqlx::query_as::<_, fetch::DueFeed>(
         "SELECT id, url, site_url, etag, last_modified, fetch_interval_secs, error_count, domain,
-         category, images_fetched_at
+         category, images_fetched_at, avatar_url, favicon_fetched_at
          FROM feeds WHERE status = 'active' AND next_fetch_at <= datetime('now')
          ORDER BY next_fetch_at ASC LIMIT 50",
     )

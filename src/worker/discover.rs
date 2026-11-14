@@ -441,6 +441,54 @@ pub fn extract_og_image(html: &str, base: &Url) -> Option<String> {
         })
 }
 
+/// Site icon candidates, best first: apple-touch-icon (large and square),
+/// then any `rel="icon"` link, then `/favicon.ico`. The caller caches the first
+/// one that downloads; SVG entries are rejected later by `assets::cache_in`.
+pub fn extract_icons(html: &str, base: &Url) -> Vec<String> {
+    let Ok(selector) = Selector::parse("link[rel][href]") else {
+        return Vec::new();
+    };
+    let document = Html::parse_document(html);
+    let mut touch = Vec::new();
+    let mut plain = Vec::new();
+    for element in document.select(&selector) {
+        let rel = element
+            .value()
+            .attr("rel")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let tokens: Vec<&str> = rel.split_whitespace().collect();
+        let touch_icon = tokens.contains(&"apple-touch-icon");
+        if !touch_icon && !tokens.contains(&"icon") {
+            continue;
+        }
+        let Some(href) = element.value().attr("href") else {
+            continue;
+        };
+        let Ok(url) = base.join(href.trim()) else {
+            continue;
+        };
+        if !matches!(url.scheme(), "http" | "https") {
+            continue;
+        }
+        let target = if touch_icon { &mut touch } else { &mut plain };
+        let value = url.to_string();
+        if !target.contains(&value) {
+            target.push(value);
+        }
+    }
+    touch.extend(plain);
+    if let Ok(fallback) = base.join("/favicon.ico")
+        && matches!(fallback.scheme(), "http" | "https")
+    {
+        let value = fallback.to_string();
+        if !touch.contains(&value) {
+            touch.push(value);
+        }
+    }
+    touch
+}
+
 /// One video lifted from a channel's `/videos` page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChannelVideo {
@@ -902,8 +950,30 @@ fn is_channel_id(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelVideo, channel_video_feed, parse_feed};
+    use super::{ChannelVideo, channel_video_feed, extract_icons, parse_feed};
     use chrono::Utc;
+    use url::Url;
+
+    #[test]
+    fn icons_prefer_touch_then_icon_then_favicon_ico() {
+        let base = Url::parse("https://example.com/blog/post").unwrap();
+        let html = r#"<link rel="icon" href="/small.png">
+            <link rel="apple-touch-icon" href="/touch.png">
+            <link rel="shortcut icon" href="https://cdn.example.com/fav.ico">"#;
+        assert_eq!(
+            extract_icons(html, &base),
+            vec![
+                "https://example.com/touch.png",
+                "https://example.com/small.png",
+                "https://cdn.example.com/fav.ico",
+                "https://example.com/favicon.ico",
+            ]
+        );
+        assert_eq!(
+            extract_icons("<p>no icons</p>", &base),
+            vec!["https://example.com/favicon.ico"]
+        );
+    }
 
     #[test]
     fn synthesized_channel_feed_parses_like_rss() {

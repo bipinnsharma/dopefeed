@@ -254,6 +254,8 @@ async fn refresh_handles_304_as_success() {
         domain: "127.0.0.1".into(),
         category: "tech".into(),
         images_fetched_at: None,
+        avatar_url: None,
+        favicon_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
     assert_eq!(post_count(&state.pool, id).await, 0);
@@ -292,6 +294,8 @@ async fn refresh_success_adapts_interval() {
         domain: "127.0.0.1".into(),
         category: "tech".into(),
         images_fetched_at: None,
+        avatar_url: None,
+        favicon_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -341,6 +345,8 @@ async fn refresh_rediscovers_html_feed_with_existing_posts() {
         domain: "127.0.0.1".into(),
         category: "tech".into(),
         images_fetched_at: None,
+        avatar_url: None,
+        favicon_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -374,6 +380,8 @@ async fn refresh_failure_backs_off() {
         domain: "127.0.0.1".into(),
         category: "tech".into(),
         images_fetched_at: None,
+        avatar_url: None,
+        favicon_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
 
@@ -416,6 +424,8 @@ async fn refresh_rejects_oversized_body() {
         domain: "127.0.0.1".into(),
         category: "tech".into(),
         images_fetched_at: None,
+        avatar_url: None,
+        favicon_fetched_at: None,
     };
     fetch::refresh(&state, &due).await.unwrap();
     let last_error: Option<String> =
