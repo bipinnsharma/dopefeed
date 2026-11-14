@@ -44,6 +44,13 @@ impl AppState {
 /// Select expression shared by every post list (timeline and feed pages).
 pub const POST_COLUMNS: &str = r#"
 p.id, p.feed_id, f.title AS feed_title, f.domain AS feed_domain, p.guid,
+p.url, p.title, p.author, p.summary, p.thumb_url,
+date(p.published_at) AS published_label
+"#;
+
+/// Reader query: the list columns plus the article body.
+pub const POST_READER_COLUMNS: &str = r#"
+p.id, p.feed_id, f.title AS feed_title, f.domain AS feed_domain, p.guid,
 p.url, p.title, p.author, p.summary, p.content_html, p.thumb_url,
 date(p.published_at) AS published_label
 "#;

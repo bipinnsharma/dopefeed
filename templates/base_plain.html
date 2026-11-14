@@ -6,10 +6,10 @@
 <title>{% block title %}dopefeed{% endblock %}</title>
 {% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 {% block head %}{% endblock %}
-<script src="/static/htmx.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>

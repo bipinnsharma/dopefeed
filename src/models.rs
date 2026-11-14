@@ -54,6 +54,23 @@ impl Feed {
     }
 }
 
+/// A post list row: everything the list templates need, without the body.
+#[derive(Clone, Debug, sqlx::FromRow)]
+#[allow(dead_code)] // shared column set; a list template reads only some fields
+pub struct PostRow {
+    pub id: i64,
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub feed_domain: String,
+    pub guid: String,
+    pub url: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub summary: String,
+    pub thumb_url: Option<String>,
+    pub published_label: String,
+}
+
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct Post {
     pub id: i64,
@@ -105,6 +122,22 @@ pub fn first_image(html: &str, page_url: &str) -> Option<String> {
         })
 }
 
+impl PostRow {
+    /// The image the list row shows: the locally cached one once downloaded.
+    pub fn thumb(&self) -> Option<String> {
+        self.thumb_url
+            .clone()
+            .filter(|url| !url.is_empty())
+            .or_else(|| youtube_thumb(&self.guid))
+    }
+
+    /// The row always has a thumb slot, so a missing poster must not collapse it.
+    pub fn thumb_or_placeholder(&self) -> String {
+        self.thumb()
+            .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
+    }
+}
+
 impl Post {
     /// YouTube id, used for the privacy embed.
     pub fn youtube_id(&self) -> Option<&str> {
@@ -116,19 +149,9 @@ impl Post {
         self.content_html.trim().is_empty()
     }
 
-    /// The image the list row shows: the locally cached one once downloaded.
-    pub fn thumb(&self) -> Option<String> {
-        self.thumb_url.clone().or_else(|| youtube_thumb(&self.guid))
-    }
-
-    /// The row always has a thumb slot, so a missing poster must not collapse it.
-    pub fn thumb_or_placeholder(&self) -> String {
-        self.thumb()
-            .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
-    }
-
     /// First image in the entry (its usual OG/hero image), else the YouTube
-    /// thumbnail. Used as the detail-page cover.
+    /// thumbnail.
+    #[allow(dead_code)] // content-dependent; no request path needs it now
     pub fn cover_image(&self) -> Option<String> {
         if let Some(id) = self.youtube_id() {
             return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
@@ -137,14 +160,12 @@ impl Post {
     }
 
     /// Reader cover: the cached copy for blog posts, the sharper remote poster
-    /// for YouTube.
+    /// for YouTube. No body parsing: the worker already extracted the thumb.
     pub fn reader_cover(&self) -> Option<String> {
-        if self.youtube_id().is_none()
-            && let Some(local) = &self.thumb_url
-        {
-            return Some(local.clone());
+        if let Some(id) = self.youtube_id() {
+            return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
         }
-        self.cover_image()
+        self.thumb_url.clone().filter(|url| !url.is_empty())
     }
 }
 

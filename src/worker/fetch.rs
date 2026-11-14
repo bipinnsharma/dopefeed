@@ -9,7 +9,7 @@ use reqwest::{
 use scraper::Html;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use url::Url;
 
 const MAX_ENTRIES: usize = 500;
@@ -335,8 +335,8 @@ pub async fn ingest(
     feed: &feed_rs::model::Feed,
     fallback_url: &str,
 ) -> anyhow::Result<usize> {
-    let existing: HashSet<String> =
-        sqlx::query_scalar::<_, String>("SELECT guid FROM posts WHERE feed_id = ?")
+    let existing: HashMap<String, Option<String>> =
+        sqlx::query_as("SELECT guid, content_hash FROM posts WHERE feed_id = ?")
             .bind(feed_id)
             .fetch_all(pool)
             .await?
@@ -379,7 +379,17 @@ pub async fn ingest(
             .and_then(|c| c.body.clone())
             .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()))
             .unwrap_or_default();
-        let content_html = ammonia::clean(&raw);
+        let entry_hash = content_hash(&url, &display_title, &raw, published.as_deref());
+        if existing
+            .get(&guid)
+            .is_some_and(|stored| stored.as_deref() == Some(entry_hash.as_str()))
+        {
+            continue;
+        }
+        // Decoded lazily: body images sit below the fold and the reader
+        // should not fetch them all at once.
+        let content_html =
+            ammonia::clean(&raw).replace("<img ", "<img loading=\"lazy\" decoding=\"async\" ");
         let summary_source = entry
             .summary
             .as_ref()
@@ -396,12 +406,12 @@ pub async fn ingest(
         let thumb = crate::models::youtube_thumb(&guid)
             .or_else(|| crate::models::first_image(&content_html, &url));
 
-        if existing.contains(&guid) {
+        if existing.contains_key(&guid) {
             // Only move a date backwards: a feed with no real date must not
             // keep pushing old posts to the top of Recent.
             sqlx::query(
                 "UPDATE posts SET title = ?, content_html = ?, summary = ?, author = ?,
-                 thumb_url = COALESCE(thumb_url, ?),
+                 thumb_url = COALESCE(thumb_url, ?), content_hash = ?,
                  published_at = CASE WHEN ? < published_at THEN ? ELSE published_at END
                  WHERE feed_id = ? AND guid = ?",
             )
@@ -410,6 +420,7 @@ pub async fn ingest(
             .bind(&summary)
             .bind(&author)
             .bind(&thumb)
+            .bind(&entry_hash)
             .bind(&published)
             .bind(&published)
             .bind(feed_id)
@@ -419,7 +430,7 @@ pub async fn ingest(
         } else {
             sqlx::query(
                 "INSERT INTO posts (feed_id, guid, url, title, author, content_html, summary,
-                 thumb_url, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 thumb_url, published_at, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(feed_id)
             .bind(&guid)
@@ -430,6 +441,7 @@ pub async fn ingest(
             .bind(&summary)
             .bind(&thumb)
             .bind(published.unwrap_or_else(|| sqlite_time(Utc::now())))
+            .bind(&entry_hash)
             .execute(pool)
             .await?;
             new_posts += 1;
@@ -441,6 +453,21 @@ pub async fn ingest(
 fn hash(title: &str, link: &str) -> String {
     let digest = Sha256::digest(format!("{title}{link}").as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Hash of the entry inputs that decide the stored row, so an unchanged entry
+/// can skip sanitizing and extracting its body.
+fn content_hash(url: &str, title: &str, raw: &str, published: Option<&str>) -> String {
+    let mut hasher = Sha256::new();
+    for part in [url, title, raw, published.unwrap_or_default()] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 pub fn plain_text(html: &str) -> String {

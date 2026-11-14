@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+<meta name="description" content="{% block description %}A hand-picked directory of RSS, Atom and YouTube feeds with a clean reader.{% endblock %}">
 {% include "_theme_init.html" %}
 <script>
 (function () {
@@ -14,6 +15,7 @@
 })();
 </script>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 {% block head %}{% endblock %}

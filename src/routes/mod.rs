@@ -9,7 +9,7 @@ use crate::state::AppState;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
-    http::{HeaderValue, Request, header},
+    http::{HeaderName, HeaderValue, Method, Request, StatusCode, header},
     middleware::{self, Next},
     response::Response,
     routing::{get, post},
@@ -44,7 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/terms", get(static_pages::terms))
         .route("/privacy", get(static_pages::privacy))
         .route("/healthz", get(static_pages::healthz))
-        .nest_service("/static", ServeDir::new("static").precompressed_gzip())
+        .nest_service("/static", ServeDir::new("static"))
         .layer(middleware::from_fn(cache_static))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -53,18 +53,55 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn cache_static(request: Request<axum::body::Body>, next: Next) -> Response {
-    let is_static = request.uri().path().starts_with("/static/");
+    let path = request.uri().path().to_owned();
+    let is_get = request.method() == Method::GET;
     let mut response = next.run(request).await;
-    if is_static {
+
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+    headers.insert(
+        header::X_FRAME_OPTIONS,
+        HeaderValue::from_static("SAMEORIGIN"),
+    );
+
+    let policy = if path.starts_with("/static/assets/") {
+        Some("public, max-age=31536000, immutable")
+    } else if path.starts_with("/static/") {
         // Debug builds revalidate so CSS/JS edits show immediately.
-        let policy = if cfg!(debug_assertions) {
+        Some(if cfg!(debug_assertions) {
             "no-cache"
         } else {
             "public, max-age=86400"
-        };
+        })
+    } else if is_get && response.status() == StatusCode::OK && is_public_page(&path) {
+        Some("public, s-maxage=300, stale-while-revalidate=600")
+    } else {
+        None
+    };
+    if let Some(policy) = policy {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
     }
     response
+}
+
+/// Public pages only: admin, submit, API and health checks must stay uncached.
+fn is_public_page(path: &str) -> bool {
+    matches!(
+        path,
+        "/" | "/feeds" | "/about" | "/websites" | "/links" | "/skills" | "/terms" | "/privacy"
+    ) || path.starts_with("/f/")
+        || path.starts_with("/read/")
 }

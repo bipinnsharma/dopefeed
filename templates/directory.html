@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}dopefeed — Read what matters{% endblock %}
+{% block scripts %}<script src="/static/htmx.min.js" defer></script>{% endblock %}
 {% block search %}
 <form id="filters" class="topbar-search" role="search" action="/" method="get"
       hx-get="/feeds" hx-trigger="keyup changed delay:300ms, search"
@@ -11,6 +12,7 @@
 </form>
 {% endblock %}
 {% block content %}
+<h1 class="sr-only">Dopefeed — a directory of RSS, Atom and YouTube feeds</h1>
 <section class="directory">
   <div class="filter-row">
     <nav class="chips" aria-label="Categories">

@@ -1,7 +1,7 @@
 use crate::{
     error::{AppError, AppResult},
-    models::{Feed, FeedQuery, Post},
-    state::{AppState, POST_COLUMNS},
+    models::{Feed, FeedQuery, Post, PostRow},
+    state::{AppState, POST_COLUMNS, POST_READER_COLUMNS},
 };
 use askama::Template;
 use axum::{
@@ -13,7 +13,7 @@ use axum::{
 #[template(path = "feed.html")]
 struct FeedTemplate {
     feed: Feed,
-    posts: Vec<Post>,
+    posts: Vec<PostRow>,
     flash: Option<String>,
 }
 
@@ -44,7 +44,7 @@ pub async fn detail(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let posts = sqlx::query_as::<_, Post>(sqlx::AssertSqlSafe(format!(
+    let posts = sqlx::query_as::<_, PostRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {POST_COLUMNS} FROM posts p JOIN feeds f ON f.id = p.feed_id
          WHERE p.feed_id = ? ORDER BY p.published_at DESC, p.id DESC LIMIT 50"
     )))
@@ -62,7 +62,7 @@ pub async fn detail(
 
 pub async fn read(State(state): State<AppState>, Path(id): Path<i64>) -> AppResult<Html<String>> {
     let post = sqlx::query_as::<_, Post>(sqlx::AssertSqlSafe(format!(
-        "SELECT {POST_COLUMNS} FROM posts p JOIN feeds f ON f.id = p.feed_id
+        "SELECT {POST_READER_COLUMNS} FROM posts p JOIN feeds f ON f.id = p.feed_id
          WHERE p.id = ? AND f.status = 'active'"
     )))
     .bind(id)

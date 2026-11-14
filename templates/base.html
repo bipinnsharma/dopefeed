@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}dopefeed{% endblock %}</title>
+<meta name="description" content="{% block description %}A hand-picked directory of RSS, Atom and YouTube feeds with a clean reader.{% endblock %}">
 <script>
   if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     document.documentElement.classList.add("motion-pending");
@@ -14,10 +15,11 @@
 </script>
 {% include "_theme_init.html" %}
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 {% block head %}{% endblock %}
-<script src="/static/htmx.min.js" defer></script>
+{% block scripts %}{% endblock %}
 <script src="/static/app.js" defer></script>
 </head>
 <body>

@@ -121,13 +121,14 @@ async fn backfill_body_thumbs(pool: &SqlitePool, feed_id: i64) {
     .await
     .unwrap_or_default();
     for (id, url, html) in rows {
-        if let Some(thumb) = crate::models::first_image(&html, &url) {
-            let _ = sqlx::query("UPDATE posts SET thumb_url = ? WHERE id = ?")
-                .bind(thumb)
-                .bind(id)
-                .execute(pool)
-                .await;
-        }
+        // An empty string records "no body image" so the IS NULL query above
+        // does not re-parse this article on every refresh.
+        let thumb = crate::models::first_image(&html, &url).unwrap_or_default();
+        let _ = sqlx::query("UPDATE posts SET thumb_url = ? WHERE id = ?")
+            .bind(thumb)
+            .bind(id)
+            .execute(pool)
+            .await;
     }
 }
 

@@ -1,5 +1,10 @@
 use crate::{
-    config::Config, models::Post, routes, state::AppState, worker::fetch, worker::fetch::DueFeed,
+    config::Config,
+    models::{Post, PostRow},
+    routes,
+    state::AppState,
+    worker::fetch,
+    worker::fetch::DueFeed,
     worker::ssrf,
 };
 use reqwest::{
@@ -158,6 +163,46 @@ async fn ingest_dedups_and_sanitizes() {
             .unwrap();
     assert!(summary.chars().count() <= 300);
     assert!(summary.contains("short summary"));
+}
+
+#[tokio::test]
+async fn ingest_skips_unchanged_entries() {
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://example.com/feed.xml", "active").await;
+    let feed = feed_rs::parser::parse(RSS).unwrap();
+    fetch::ingest(&state.pool, id, &feed, "https://example.com")
+        .await
+        .unwrap();
+
+    let hash: String = sqlx::query_scalar(
+        "SELECT content_hash FROM posts WHERE feed_id = ? AND guid = 'fixture-1'",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    // A second ingest must not overwrite the row when the feed input is equal.
+    sqlx::query(
+        "UPDATE posts SET content_html = '<p>kept</p>' WHERE feed_id = ? AND guid = 'fixture-1'",
+    )
+    .bind(id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let second = fetch::ingest(&state.pool, id, &feed, "https://example.com")
+        .await
+        .unwrap();
+    assert_eq!(second, 0);
+    let (content, stored_hash): (String, String) = sqlx::query_as(
+        "SELECT content_html, content_hash FROM posts WHERE feed_id = ? AND guid = 'fixture-1'",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(content, "<p>kept</p>");
+    assert_eq!(stored_hash, hash);
 }
 
 #[tokio::test]
@@ -687,6 +732,44 @@ async fn no_cookies_are_set() {
     assert!(home.contains("Fixture Feed"));
 }
 
+#[tokio::test]
+async fn cache_and_security_headers_are_scoped() {
+    let (base, state) = spawn_app().await;
+    let feed = add_feed(&state.pool, "https://a.example/feed", "active").await;
+    let client = Client::new();
+
+    let page = client.get(format!("{base}/")).send().await.unwrap();
+    let headers = page.headers();
+    assert_eq!(
+        headers.get("cache-control").unwrap().to_str().unwrap(),
+        "public, s-maxage=300, stale-while-revalidate=600"
+    );
+    for (name, value) in [
+        ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "strict-origin-when-cross-origin"),
+        (
+            "permissions-policy",
+            "camera=(), microphone=(), geolocation=()",
+        ),
+        ("x-frame-options", "SAMEORIGIN"),
+    ] {
+        assert_eq!(headers.get(name).unwrap().to_str().unwrap(), value);
+    }
+
+    // Health checks and API responses never get the shared-cache policy.
+    for path in [
+        "/healthz".to_string(),
+        format!("/api/timeline?feeds={feed}"),
+    ] {
+        let response = client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(response.status(), 200, "{path}");
+        assert!(
+            response.headers().get("cache-control").is_none(),
+            "{path} must not be cached"
+        );
+    }
+}
+
 // ---------- M5: submission ----------
 
 async fn submit(client: &Client, base: &str, url: &str) -> reqwest::Response {
@@ -1009,7 +1092,7 @@ fn feed_parser_drops_empty_text_elements() {
 
 #[test]
 fn youtube_thumb_is_derived_from_guid() {
-    let mut post = Post {
+    let mut post = PostRow {
         id: 1,
         feed_id: 1,
         feed_title: "t".into(),
@@ -1019,7 +1102,6 @@ fn youtube_thumb_is_derived_from_guid() {
         title: "t".into(),
         author: None,
         summary: String::new(),
-        content_html: String::new(),
         thumb_url: None,
         published_label: "2025-01-01".into(),
     };
@@ -1036,6 +1118,12 @@ fn youtube_thumb_is_derived_from_guid() {
     post.guid = "guid".into();
     post.thumb_url = None;
     assert!(post.thumb().is_none());
+    // The backfill writes '' for "no body image"; render it as a placeholder.
+    post.thumb_url = Some(String::new());
+    assert_eq!(
+        post.thumb_or_placeholder(),
+        crate::models::PLACEHOLDER_IMAGE
+    );
 }
 
 #[test]

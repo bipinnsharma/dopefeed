@@ -2,3 +2,5 @@
 /data
 .env
 /static/assets
+.vercel
+.env*

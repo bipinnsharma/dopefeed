@@ -1,0 +1,5 @@
+.env
+/target
+/data/dopefeed.db
+/data/dopefeed.db-shm
+/data/dopefeed.db-wal

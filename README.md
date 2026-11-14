@@ -89,3 +89,20 @@ docker run -p 3000:3000 -v dopefeed-data:/app/data dopefeed
 ```
 
 The image runs as a non-root user and stores SQLite in `/app/data`.
+
+### Vercel
+
+`Dockerfile.vercel` runs the same binary on Vercel's Container Runtime. It seeds
+`/tmp/dopefeed.db` from the compressed `data/dopefeed.db.xz` snapshot because the
+container filesystem is read-only elsewhere.
+
+```sh
+vercel link --project dopefeed
+vercel deploy --prod
+```
+
+Set `BASE_URL=https://dopefeed.vercel.app` and `PORT=3000` in the project settings.
+The SQLite file and anything the worker caches are per-instance and lost when the
+function scales to zero; submissions are not persistent on Vercel. Local images in
+`static/assets` must be downscaled to WebP before deploying to stay under the
+Vercel source size limit.

@@ -1,6 +1,6 @@
 use crate::{
     error::{AppError, AppResult},
-    models::{Post, TIMELINE_PAGE, TimelineQuery},
+    models::{PostRow, TIMELINE_PAGE, TimelineQuery},
     state::{AppState, POST_COLUMNS},
 };
 use askama::Template;
@@ -17,7 +17,7 @@ struct MyTemplate;
 #[derive(Template)]
 #[template(path = "_post_list.html")]
 struct PostList {
-    posts: Vec<Post>,
+    posts: Vec<PostRow>,
     page: i64,
     has_more: bool,
     feeds: String,
@@ -67,7 +67,10 @@ pub async fn timeline(
         .push_bind(TIMELINE_PAGE + 1)
         .push(" OFFSET ")
         .push_bind((page - 1) * TIMELINE_PAGE);
-    let posts = rows.build_query_as::<Post>().fetch_all(&state.pool).await?;
+    let posts = rows
+        .build_query_as::<PostRow>()
+        .fetch_all(&state.pool)
+        .await?;
     let has_more = posts.len() as i64 > TIMELINE_PAGE;
     let posts = posts.into_iter().take(TIMELINE_PAGE as usize).collect();
     let feeds = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
