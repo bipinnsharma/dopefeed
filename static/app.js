@@ -209,41 +209,6 @@
     });
   }
 
-  function revealLayout() {
-    root.classList.remove("motion-pending");
-  }
-
-  if (root.classList.contains("motion-pending") && !reduceMotion && Element.prototype.animate) {
-    var targets = Array.prototype.slice.call(
-      document.querySelectorAll(
-        ".sidebar, .topbar, .mobile-nav, .feed-cover, .page-head, " +
-          ".feed-card, .post-row, .static-page, .admin-main"
-      )
-    );
-    var animations = targets.map(function (element, index) {
-      return element.animate(
-        [
-          { opacity: 0, transform: "translateY(8px)" },
-          { opacity: 1, transform: "translateY(0)" },
-        ],
-        {
-          duration: 400,
-          delay: index * 30,
-          easing: "cubic-bezier(0.2, 0, 0, 1)",
-          fill: "both",
-        }
-      );
-    });
-    Promise.all(animations.map(function (animation) { return animation.finished; }))
-      .then(function () {
-        revealLayout();
-        animations.forEach(function (animation) { animation.cancel(); });
-      })
-      .catch(revealLayout);
-  } else {
-    revealLayout();
-  }
-
   var timeline = document.getElementById("timeline");
   if (timeline) {
     if (subs.length === 0) {

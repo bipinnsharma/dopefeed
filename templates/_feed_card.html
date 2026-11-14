@@ -15,7 +15,7 @@
   </div>
   {% if let Some(description) = feed.description %}<p class="feed-card-desc">{{ description }}</p>{% endif %}
   <p class="feed-card-meta">
-    {% if feed.is_new() %}<span class="new-pill">new post</span>{% endif %}
+    {% if feed.is_new() %}<span class="new-pill">new</span>{% endif %}
     <span class="feed-card-count">{% if feed.post_count == 1 %}1 post{% else %}{{ feed.post_count }} posts{% endif %}</span>
   </p>
 </article>
