@@ -22,6 +22,24 @@
     }
   }
 
+  var snackbar;
+  var snackbarTimer;
+
+  function showSnackbar(message) {
+    if (!snackbar) {
+      snackbar = document.createElement("div");
+      snackbar.className = "snackbar";
+      snackbar.setAttribute("role", "status");
+      document.body.appendChild(snackbar);
+    }
+    snackbar.textContent = message;
+    snackbar.classList.add("is-open");
+    clearTimeout(snackbarTimer);
+    snackbarTimer = setTimeout(function () {
+      snackbar.classList.remove("is-open");
+    }, 3000);
+  }
+
   var subs = load(SUBS).map(Number).filter(Number.isInteger);
   var read = load(READ).map(Number).filter(Number.isInteger);
 
@@ -33,11 +51,15 @@
     }
     paint();
     button.addEventListener("click", function () {
-      subs = subs.indexOf(id) !== -1
+      var wasOn = subs.indexOf(id) !== -1;
+      subs = wasOn
         ? subs.filter(function (value) { return value !== id; })
         : subs.concat(id);
       save(SUBS, subs);
       paint();
+      if (!wasOn) {
+        showSnackbar((button.dataset.feedTitle || "Feed") + " is added to your feed.");
+      }
     });
   });
 
