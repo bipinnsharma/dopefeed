@@ -3,7 +3,7 @@
     {% if let Some(avatar) = feed.avatar_url %}
     <img class="feed-icon feed-avatar" src="{{ avatar }}" alt="{{ feed.title }}"
          width="48" height="48" loading="lazy"
-         onerror="this.src='/static/no-image-dl.jpg'">
+         decoding="async" onerror="this.src='/static/no-image-dl.jpg'">
     {% else %}
     <span class="feed-avatar feed-avatar-fallback" aria-hidden="true"><span class="feed-avatar-letter">{{ feed.title }}</span></span>
     {% endif %}

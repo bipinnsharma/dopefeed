@@ -3,7 +3,6 @@
 html {
   background: var(--color-surface);
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
 body {
@@ -44,14 +43,13 @@ img { max-width: 100%; }
   * { transition: none !important; animation: none !important; }
 }
 
-/* Page load: sidebar slides in from the left, header from the top, then the
-   directory fades in. Trigger: initial page paint. Easing: decelerate. */
+/* Page load: sidebar slides in from the left, header from the top.
+   Trigger: initial page paint. Easing: decelerate. */
 @media (prefers-reduced-motion: no-preference) {
   .sidebar { animation: slide-in-left 360ms cubic-bezier(.2, 0, 0, 1) both; }
   .topbar, .mobile-bar {
     animation: slide-in-top 280ms cubic-bezier(.2, 0, 0, 1) 80ms both;
   }
-  .directory { animation: fade-in 320ms cubic-bezier(.2, 0, 0, 1) 160ms both; }
 }
 
 @keyframes slide-in-left {
@@ -62,11 +60,6 @@ img { max-width: 100%; }
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: none; }
 }
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .container {
   width: 100%;
   max-width: 1100px;
