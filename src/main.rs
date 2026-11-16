@@ -33,11 +33,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let state = AppState::new(pool, config)?;
-    worker::spawn(state.clone());
-
     let bind_addr = state.config.bind_addr;
-    let app = routes::router(state);
+    let app = routes::router(state.clone());
+    // Bind before the worker starts so cold instances answer immediately.
     let listener = TcpListener::bind(bind_addr).await?;
+
+    if std::env::var("WORKER").map(|v| v != "0").unwrap_or(true) {
+        worker::spawn(state);
+    }
     tracing::info!(addr = %bind_addr, "dopefeed listening");
 
     axum::serve(

@@ -22,10 +22,16 @@ pub fn valid_admin_key(key: &str) -> bool {
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
-        let bind_addr = std::env::var("BIND_ADDR")
-            .unwrap_or_else(|_| "127.0.0.1:3000".into())
-            .parse()
-            .context("BIND_ADDR must be a socket address")?;
+        let bind_addr = match std::env::var("BIND_ADDR") {
+            Ok(addr) => addr,
+            // Vercel assigns the port; bind publicly inside the container.
+            Err(_) => match std::env::var("PORT") {
+                Ok(port) => format!("0.0.0.0:{port}"),
+                Err(_) => "127.0.0.1:3000".into(),
+            },
+        }
+        .parse()
+        .context("BIND_ADDR must be a socket address")?;
         let base_url = std::env::var("BASE_URL")
             .unwrap_or_else(|_| "http://localhost:3000".into())
             .parse()

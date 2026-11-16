@@ -75,8 +75,10 @@ async fn cache_static(request: Request<axum::body::Body>, next: Next) -> Respons
         HeaderValue::from_static("SAMEORIGIN"),
     );
 
+    let ok = response.status() == StatusCode::OK;
     let policy = if path.starts_with("/static/assets/") {
-        Some("public, max-age=31536000, immutable")
+        // A missing file must not be cached for a year.
+        ok.then_some("public, max-age=31536000, immutable")
     } else if path.starts_with("/static/") {
         // Debug builds revalidate so CSS/JS edits show immediately.
         Some(if cfg!(debug_assertions) {
@@ -84,8 +86,10 @@ async fn cache_static(request: Request<axum::body::Body>, next: Next) -> Respons
         } else {
             "public, max-age=86400"
         })
-    } else if is_get && response.status() == StatusCode::OK && is_public_page(&path) {
-        Some("public, s-maxage=300, stale-while-revalidate=600")
+    } else if is_get && ok && path == "/api/timeline" {
+        Some("public, s-maxage=60, stale-while-revalidate=300")
+    } else if is_get && ok && is_public_page(&path) {
+        Some("public, s-maxage=600, stale-while-revalidate=86400")
     } else {
         None
     };
@@ -97,7 +101,7 @@ async fn cache_static(request: Request<axum::body::Body>, next: Next) -> Respons
     response
 }
 
-/// Public pages only: admin, submit, API and health checks must stay uncached.
+/// Public pages only: admin, submit, other API paths and health checks stay uncached.
 fn is_public_page(path: &str) -> bool {
     matches!(
         path,

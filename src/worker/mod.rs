@@ -11,7 +11,9 @@ const DOMAIN_GAP: Duration = Duration::from_secs(2);
 
 pub fn spawn(state: AppState) {
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(TICK);
+        // Skip the immediate first tick so cold starts serve requests first.
+        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + TICK, TICK);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
             if let Err(error) = run_tick(&state).await {
@@ -19,6 +21,27 @@ pub fn spawn(state: AppState) {
             }
         }
     });
+}
+
+/// Backs `refresh`: forces every active feed due, then ticks until nothing is due.
+#[allow(dead_code)] // wired to the upcoming `refresh` subcommand
+pub async fn refresh_all(state: &AppState) -> anyhow::Result<()> {
+    sqlx::query("UPDATE feeds SET next_fetch_at = datetime('now') WHERE status = 'active'")
+        .execute(&state.pool)
+        .await?;
+    for _ in 0..40 {
+        let (due,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM feeds
+             WHERE status = 'active' AND next_fetch_at <= datetime('now')",
+        )
+        .fetch_one(&state.pool)
+        .await?;
+        if due == 0 {
+            break;
+        }
+        run_tick(state).await?;
+    }
+    Ok(())
 }
 
 async fn run_tick(state: &AppState) -> anyhow::Result<()> {
