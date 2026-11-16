@@ -26,8 +26,8 @@
   {% else %}
   {% if let Some(cover) = cover %}
   <figure class="reader-cover">
-    <img src="{{ cover }}" alt="" loading="eager"
-         onerror="this.src='/static/no-image-dl.jpg'">
+    <img src="{{ cover }}" alt="" decoding="async" fetchpriority="high" loading="eager"
+         onerror="this.onerror=null;this.src='{{ post.thumb_or_placeholder() }}'">
   </figure>
   {% else %}
   {% if !post.is_stub() %}

@@ -165,7 +165,27 @@ impl Post {
         if let Some(id) = self.youtube_id() {
             return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
         }
-        self.thumb_url.clone().filter(|url| !url.is_empty())
+        let thumb = self.thumb_url.clone().filter(|url| !url.is_empty())?;
+        Some(cover_variant(&thumb))
+    }
+
+    /// Fallback for a cover whose 1200px sibling is missing.
+    pub fn thumb_or_placeholder(&self) -> String {
+        self.thumb_url
+            .clone()
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
+    }
+}
+
+/// Cached post images are written next to a 1200px copy of themselves.
+fn cover_variant(url: &str) -> String {
+    if !url.starts_with("/static/assets/posts/") {
+        return url.to_string();
+    }
+    match url.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}-1200.{ext}"),
+        None => url.to_string(),
     }
 }
 
@@ -198,4 +218,48 @@ pub struct FeedPage {
     pub sort: String,
     pub page: i64,
     pub has_more: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Post;
+
+    fn post(guid: &str, thumb: Option<&str>) -> Post {
+        Post {
+            id: 1,
+            feed_id: 1,
+            feed_title: "Feed".into(),
+            feed_domain: "example.com".into(),
+            guid: guid.into(),
+            url: "https://example.com/post".into(),
+            title: "Title".into(),
+            author: None,
+            summary: String::new(),
+            content_html: String::new(),
+            thumb_url: thumb.map(str::to_string),
+            published_label: "2025-01-01".into(),
+        }
+    }
+
+    #[test]
+    fn reader_cover_uses_the_1200px_sibling() {
+        assert_eq!(
+            post("guid", Some("/static/assets/posts/abc123.png"))
+                .reader_cover()
+                .as_deref(),
+            Some("/static/assets/posts/abc123-1200.png")
+        );
+        assert_eq!(
+            post("guid", Some("https://cdn.example.com/hero.webp"))
+                .reader_cover()
+                .as_deref(),
+            Some("https://cdn.example.com/hero.webp")
+        );
+        assert_eq!(
+            post("yt:video:dQw4w9WgXcQ", Some("/static/assets/posts/abc.jpg"))
+                .reader_cover()
+                .as_deref(),
+            Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+        );
+    }
 }

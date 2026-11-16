@@ -198,7 +198,7 @@ async fn backfill_site_images(state: &AppState, feed: &DueFeed) -> anyhow::Resul
         let image = html.and_then(|html| discover::extract_og_image(html, &fetched.final_url));
         // A remote URL that could not be cached is likely dead (an expired CDN
         // preview); no cover beats a broken one.
-        crate::assets::cache_or_keep(&state.http, image, "feeds")
+        crate::assets::cache_or_keep(&state.http, image, "banners")
             .await
             .filter(|url| !url.starts_with("http"))
     } else {

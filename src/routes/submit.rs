@@ -205,7 +205,7 @@ pub async fn insert_resolved(
     let avatar_url =
         crate::assets::cache_or_keep(&state.http, resolved.avatar_url.clone(), "feeds").await;
     let banner_url =
-        crate::assets::cache_or_keep(&state.http, resolved.banner_url.clone(), "feeds").await;
+        crate::assets::cache_or_keep(&state.http, resolved.banner_url.clone(), "banners").await;
 
     let result = sqlx::query(
         "INSERT INTO feeds (url, site_url, domain, title, description, category, status,

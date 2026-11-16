@@ -2,17 +2,22 @@
 //! served from disk and the remote host is touched once.
 
 use crate::worker::ssrf;
+use image::{DynamicImage, ImageFormat, codecs::jpeg::JpegEncoder};
 use reqwest::{
     Client,
     header::{CONTENT_TYPE, HeaderMap},
 };
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use std::io::Cursor;
 use std::path::Path;
+use tokio::fs;
 
 /// Must stay under `static/` because that is the only directory served.
 pub const DIR: &str = "static/assets";
 const MAX_BYTES: usize = 4 * 1024 * 1024;
+/// Files already at their target width and this small are left alone.
+const SMALL_BYTES: u64 = 100 * 1024;
 
 /// Returns a public `/static/assets/...` path once the image is on disk.
 /// Repeat calls stat the file instead of fetching again.
@@ -24,7 +29,7 @@ pub async fn cache_in(dir: &Path, client: &Client, url: &str, kind: &str) -> Opt
     let digest = Sha256::digest(url.as_bytes());
     let stem: String = digest.iter().take(12).map(|b| format!("{b:02x}")).collect();
     for ext in ["jpg", "png", "webp", "gif", "avif", "ico"] {
-        if tokio::fs::metadata(dir.join(kind).join(format!("{stem}.{ext}")))
+        if fs::metadata(dir.join(kind).join(format!("{stem}.{ext}")))
             .await
             .is_ok()
         {
@@ -42,11 +47,63 @@ pub async fn cache_in(dir: &Path, client: &Client, url: &str, kind: &str) -> Opt
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())?,
     )?;
-    tokio::fs::create_dir_all(dir.join(kind)).await.ok()?;
-    tokio::fs::write(dir.join(kind).join(format!("{stem}.{ext}")), &fetched.body)
+    fs::create_dir_all(dir.join(kind)).await.ok()?;
+    let Some(width) = target_width(kind) else {
+        fs::write(dir.join(kind).join(format!("{stem}.{ext}")), &fetched.body)
+            .await
+            .ok()?;
+        return Some(public_path(kind, &stem, ext));
+    };
+    // Undecodable bytes (html errors, odd formats) keep the original file.
+    let Ok(image) = image::load_from_memory(&fetched.body) else {
+        fs::write(dir.join(kind).join(format!("{stem}.{ext}")), &fetched.body)
+            .await
+            .ok()?;
+        return Some(public_path(kind, &stem, ext));
+    };
+    let (data, out_ext) = encode(&image, width)?;
+    fs::write(dir.join(kind).join(format!("{stem}.{out_ext}")), &data)
         .await
         .ok()?;
-    Some(public_path(kind, &stem, ext))
+    if kind == "posts" {
+        let (cover, cover_ext) = encode(&image, 1200)?;
+        fs::write(
+            dir.join(kind).join(format!("{stem}-1200.{cover_ext}")),
+            &cover,
+        )
+        .await
+        .ok()?;
+    }
+    Some(public_path(kind, &stem, out_ext))
+}
+
+/// List rows render 96px, covers 1200px. `None` means "store as downloaded".
+fn target_width(kind: &str) -> Option<u32> {
+    match kind {
+        "posts" => Some(320),
+        "feeds" => Some(96),
+        "banners" => Some(1200),
+        _ => None,
+    }
+}
+
+/// Downscale to `width` and re-encode: PNG keeps transparency, everything else
+/// becomes a small JPEG. Animated inputs lose all but their first frame.
+fn encode(image: &DynamicImage, width: u32) -> Option<(Vec<u8>, &'static str)> {
+    let scaled = image.thumbnail(width, u32::MAX);
+    let transparent =
+        scaled.color().has_alpha() && scaled.to_rgba8().pixels().any(|pixel| pixel.0[3] < 255);
+    if transparent {
+        let mut out = Cursor::new(Vec::new());
+        scaled.write_to(&mut out, ImageFormat::Png).ok()?;
+        Some((out.into_inner(), "png"))
+    } else {
+        let mut out = Vec::new();
+        JpegEncoder::new_with_quality(&mut out, 82)
+            .encode_image(&DynamicImage::ImageRgb8(scaled.to_rgb8()))
+            .ok()?;
+        Some((out, "jpg"))
+    }
 }
 
 /// Only formats a browser renders inertly; SVG can carry script.
@@ -145,7 +202,7 @@ pub async fn localize_feed_images(pool: &SqlitePool, client: &Client, dir: &Path
         return;
     };
     let avatar = localize_one(dir, client, avatar, "feeds").await;
-    let banner = localize_one(dir, client, banner, "feeds").await;
+    let banner = localize_one(dir, client, banner, "banners").await;
     let _ = sqlx::query("UPDATE feeds SET avatar_url = ?, banner_url = ? WHERE id = ?")
         .bind(avatar)
         .bind(banner)
@@ -173,9 +230,114 @@ async fn localize_one(
     }
 }
 
+/// One-off pass over images cached at full size. Returns how many post and
+/// feed images were rewritten.
+#[allow(dead_code)] // run once by hand; no request path calls it
+pub async fn optimize_all(pool: &SqlitePool, dir: &Path) -> anyhow::Result<(usize, usize)> {
+    let mut posts = 0;
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT thumb_url FROM posts WHERE thumb_url LIKE '/static/assets/posts/%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    for path in paths {
+        if let Some(new) = optimize_file(dir, &path, "posts", 320).await {
+            if new != path {
+                sqlx::query("UPDATE posts SET thumb_url = ? WHERE thumb_url = ?")
+                    .bind(&new)
+                    .bind(&path)
+                    .execute(pool)
+                    .await?;
+            }
+            posts += 1;
+        }
+    }
+
+    let mut feeds = 0;
+    let avatars: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT avatar_url FROM feeds WHERE avatar_url LIKE '/static/assets/feeds/%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    for path in avatars {
+        if let Some(new) = optimize_file(dir, &path, "feeds", 96).await {
+            if new != path {
+                sqlx::query("UPDATE feeds SET avatar_url = ? WHERE avatar_url = ?")
+                    .bind(&new)
+                    .bind(&path)
+                    .execute(pool)
+                    .await?;
+            }
+            feeds += 1;
+        }
+    }
+
+    // Banners that used to live under feeds/ move out, so avatar sizing can
+    // never clamp a cover.
+    let banners: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT banner_url FROM feeds
+         WHERE banner_url LIKE '/static/assets/feeds/%'
+            OR banner_url LIKE '/static/assets/banners/%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    for path in banners {
+        if let Some(new) = optimize_file(dir, &path, "banners", 1200).await {
+            if new != path {
+                sqlx::query("UPDATE feeds SET banner_url = ? WHERE banner_url = ?")
+                    .bind(&new)
+                    .bind(&path)
+                    .execute(pool)
+                    .await?;
+            }
+            feeds += 1;
+        }
+    }
+    tracing::info!(posts, feeds, "optimized local assets");
+    Ok((posts, feeds))
+}
+
+/// Re-encode one cached file at `width`, writing it under `kind`'s folder.
+/// `None` means skip: undecodable, already small, or IO failed.
+async fn optimize_file(dir: &Path, public: &str, kind: &str, width: u32) -> Option<String> {
+    let name = public.rsplit('/').next()?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    // Icon and AVIF decoders are unreliable here; a broken rewrite is worse
+    // than a large file.
+    if matches!(ext.to_ascii_lowercase().as_str(), "ico" | "avif") {
+        return None;
+    }
+    let old = dir.join(public.strip_prefix("/static/assets/")?);
+    let bytes = fs::read(&old).await.ok()?;
+    let decoded = image::load_from_memory(&bytes).ok()?;
+    if decoded.width() <= width && bytes.len() as u64 <= SMALL_BYTES {
+        return None;
+    }
+    let (data, out_ext) = encode(&decoded, width)?;
+    let cover = if kind == "posts" {
+        Some(encode(&decoded, 1200)?)
+    } else {
+        None
+    };
+    let out_dir = dir.join(kind);
+    fs::create_dir_all(&out_dir).await.ok()?;
+    let out = out_dir.join(format!("{stem}.{out_ext}"));
+    fs::write(&out, &data).await.ok()?;
+    if let Some((cover, cover_ext)) = cover {
+        fs::write(out_dir.join(format!("{stem}-1200.{cover_ext}")), &cover)
+            .await
+            .ok()?;
+    }
+    if out != old {
+        fs::remove_file(&old).await.ok();
+    }
+    Some(public_path(kind, stem, out_ext))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::image_ext;
+    use super::{encode, image_ext};
+    use image::{DynamicImage, Rgba, RgbaImage};
 
     #[test]
     fn only_inert_image_types_are_cached() {
@@ -184,5 +346,21 @@ mod tests {
         assert_eq!(image_ext("image/x-icon"), Some("ico"));
         assert_eq!(image_ext("image/svg+xml"), None);
         assert_eq!(image_ext("text/html"), None);
+    }
+
+    #[test]
+    fn encode_clamps_width_and_picks_a_format() {
+        let opaque =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(200, 100, Rgba([1, 2, 3, 255])));
+        let (bytes, ext) = encode(&opaque, 50).unwrap();
+        assert_eq!(ext, "jpg");
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (50, 25));
+
+        let transparent =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(200, 100, Rgba([1, 2, 3, 0])));
+        let (bytes, ext) = encode(&transparent, 50).unwrap();
+        assert_eq!(ext, "png");
+        assert_eq!(image::load_from_memory(&bytes).unwrap().width(), 50);
     }
 }
