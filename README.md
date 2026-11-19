@@ -43,7 +43,7 @@ retrying.
 
 - `/` directory (categories, search, 24/page)
 - `/feeds` htmx grid partial
-- `/f/{id}` feed detail, latest 50 posts
+- `/f/{id}` feed detail, 50 posts/page (`?page=N`)
 - `/read/{id}` reader (sanitized HTML)
 - `/my` local timeline shell (fed by `/api/timeline`)
 - `/submit` add a feed (validated, auto-approved)
@@ -55,12 +55,18 @@ retrying.
 - `static/tokens.css` — design tokens (recent.design) verbatim
 - `static/app.css` — component styles, tokens only
 - `static/app.js` — subscriptions + read state (~45 lines)
+- `static/dev-annotate.js` — design annotator, debug builds only (see below)
 - `static/htmx.min.js` — vendored htmx 2.0.4
 - `static/fonts/` — InterVariable (jsDelivr `@fontsource-variable/inter`) and
   Departure Mono (departuremono.com)
 
 The directory, feed pages and reader work without JavaScript. Only
 subscribing and `/my` require it.
+
+Debug builds also load the design annotator. Click **Annotate** (bottom right),
+click any element, describe the change, then **Copy report** and paste it into
+the chat. Notes persist in `localStorage`. Release builds never include the
+script (`cfg!(debug_assertions)` guards the tag in `base.html`).
 
 ## Limits
 
@@ -80,6 +86,31 @@ cargo clippy --all-targets -- -D warnings
 
 Fixtures in `fixtures/` cover RSS 2.0, Atom, YouTube and malformed XML;
 integration tests use `wiremock`.
+
+## Maintenance commands
+
+```sh
+cargo run -- refresh          # force every active feed due now
+python3 scripts/topfeed_sync.py --apply  # match post lists to topfeed.xyz
+cargo run -- optimize-images  # resize/re-encode cached images once
+cargo run -- verify-assets    # fail if the DB references a missing image
+```
+
+`scripts/topfeed_sync.py` is the reference sync: for every local feed that maps
+to a topfeed.xyz feed, topfeed's entries are the source of truth. Missing posts
+are inserted as link stubs, titles and dates are refreshed, and local-only rows
+are removed. Feed names and URLs are never touched, and a topfeed feed with no
+entries is skipped. Posts are keyed by the exact entry URL, like topfeed: the
+`http`/`https`, `#fragment`, tracking-query and trailing-slash variants it lists
+are separate posts. When a feed spells a URL differently (scheme, trailing
+slash, fragment, old permalink), the sync reuses the existing row instead of
+replacing it, so a refresh cannot drop the body. API responses are cached in
+`data/topfeed-cache` for an hour, so a `--verify` right after `--apply` is
+nearly free. It is a dry run
+unless `--apply` is passed. The next RSS
+refresh fills a stub's body and poster. `scripts/snapshot.sh` runs refresh, the
+sync, image optimization and asset verification, checkpoints the WAL, rebuilds
+`data/dopefeed.db.xz`, and deploys.
 
 ## Docker
 
@@ -102,7 +133,9 @@ vercel deploy --prod
 ```
 
 Set `BASE_URL=https://dopefeed.vercel.app` and `PORT=3000` in the project settings.
-The SQLite file and anything the worker caches are per-instance and lost when the
-function scales to zero; submissions are not persistent on Vercel. Local images in
-`static/assets` must be downscaled to WebP before deploying to stay under the
-Vercel source size limit.
+`WORKER=0` disables the in-process worker there so scale-from-zero never starts a
+fetch storm; the data comes from the snapshot. Deploy with `vercel deploy --prod`
+from the working directory so the gitignored `static/assets/` is included. Images
+are already resized (post thumbs 320px, avatars 96px, covers 1200px) by
+`optimize-images`. The SQLite file and anything the worker caches are per-instance
+and lost when the function scales to zero; submissions are not persistent on Vercel.

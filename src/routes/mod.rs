@@ -28,6 +28,7 @@ pub fn router(state: AppState) -> Router {
         .merge(admin_routes)
         .route("/feeds", get(directory::grid))
         .route("/f/{id}", get(reader::detail))
+        .route("/f/{id}/posts", get(reader::posts))
         .route("/read/{id}", get(reader::read))
         .route("/my", get(my::my))
         .route("/api/timeline", get(my::timeline))

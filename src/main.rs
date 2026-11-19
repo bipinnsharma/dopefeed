@@ -1,4 +1,5 @@
 mod assets;
+mod blob;
 mod config;
 mod db;
 mod error;
@@ -27,8 +28,22 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let pool = db::init(&config).await?;
 
-    if std::env::args().nth(1).as_deref() == Some("seed") {
+    let command = std::env::args().nth(1);
+    if command.as_deref() == Some("seed") {
         seed::run(pool, config).await?;
+        return Ok(());
+    }
+    if let Some(command) = command.as_deref() {
+        let state = AppState::new(pool, config)?;
+        match command {
+            "refresh" => worker::refresh_all(&state).await?,
+            "optimize-images" => {
+                assets::optimize_all(&state.pool, std::path::Path::new(assets::DIR)).await?;
+            }
+            "verify-assets" => assets::verify_all(&state.pool).await?,
+            "sync-assets" => assets::sync_all(std::path::Path::new(assets::DIR)).await?,
+            other => anyhow::bail!("unknown command {other:?}"),
+        }
         return Ok(());
     }
 

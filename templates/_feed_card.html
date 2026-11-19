@@ -1,6 +1,6 @@
 <article class="feed-card">
   <div class="feed-card-head">
-    {% if let Some(avatar) = feed.avatar_url %}
+    {% if let Some(avatar) = feed.avatar() %}
     <img class="feed-icon feed-avatar" src="{{ avatar }}" alt="{{ feed.title }}"
          width="48" height="48" loading="lazy"
          decoding="async" onerror="this.src='/static/no-image-dl.jpg'">

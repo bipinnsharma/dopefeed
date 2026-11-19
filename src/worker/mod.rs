@@ -23,8 +23,8 @@ pub fn spawn(state: AppState) {
     });
 }
 
-/// Backs `refresh`: forces every active feed due, then ticks until nothing is due.
-#[allow(dead_code)] // wired to the upcoming `refresh` subcommand
+/// Backs `cargo run -- refresh`: forces every active feed due, then ticks until
+/// nothing is due.
 pub async fn refresh_all(state: &AppState) -> anyhow::Result<()> {
     sqlx::query("UPDATE feeds SET next_fetch_at = datetime('now') WHERE status = 'active'")
         .execute(&state.pool)

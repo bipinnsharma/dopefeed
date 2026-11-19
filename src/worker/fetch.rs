@@ -12,7 +12,18 @@ use sqlx::SqlitePool;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use url::Url;
 
-const MAX_ENTRIES: usize = 500;
+const MAX_ENTRIES: usize = 1000;
+
+/// Feeds are allowed to link with site-relative paths (pj-onori.blog does).
+fn absolute(href: &str, base: &str) -> String {
+    match Url::parse(href) {
+        Ok(url) => url.to_string(),
+        Err(_) => Url::parse(base)
+            .and_then(|base| base.join(href))
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| href.to_string()),
+    }
+}
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct DueFeed {
@@ -53,15 +64,6 @@ pub async fn refresh(state: &AppState, feed: &DueFeed) -> anyhow::Result<()> {
     } else {
         backfill_site_images(state, feed).await?;
     }
-    // Runs even when the feed fetch fails, so cached posters survive an outage.
-    crate::assets::localize_post_thumbs(
-        &state.pool,
-        &state.http,
-        std::path::Path::new(crate::assets::DIR),
-        feed.id,
-    )
-    .await;
-
     let url = Url::parse(&feed.url).map_err(|e| anyhow!("bad feed url: {e}"))?;
     let mut headers = HeaderMap::new();
     if let Some(etag) = &feed.etag
@@ -372,13 +374,17 @@ pub async fn ingest(
     feed: &feed_rs::model::Feed,
     fallback_url: &str,
 ) -> anyhow::Result<usize> {
-    let existing: HashMap<String, Option<String>> =
-        sqlx::query_as("SELECT guid, content_hash FROM posts WHERE feed_id = ?")
+    let rows: Vec<(String, Option<String>, String)> =
+        sqlx::query_as("SELECT guid, content_hash, url FROM posts WHERE feed_id = ?")
             .bind(feed_id)
             .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
+            .await?;
+    let mut existing: HashMap<String, Option<String>> = HashMap::new();
+    let mut by_url: HashMap<String, String> = HashMap::new();
+    for (guid, hash, url) in rows {
+        by_url.insert(url, guid.clone());
+        existing.insert(guid, hash);
+    }
 
     let mut new_posts = 0;
     for entry in feed.entries.iter().take(MAX_ENTRIES) {
@@ -387,7 +393,7 @@ pub async fn ingest(
             .iter()
             .find(|l| l.rel.as_deref().is_none_or(|rel| rel == "alternate"))
             .or_else(|| entry.links.first())
-            .map(|l| l.href.clone());
+            .map(|l| absolute(&l.href, fallback_url));
         let title = entry
             .title
             .as_ref()
@@ -417,8 +423,16 @@ pub async fn ingest(
             .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()))
             .unwrap_or_default();
         let entry_hash = content_hash(&url, &display_title, &raw, published.as_deref());
+        // A link-only stub stores guid = url; the RSS entry carries its own
+        // guid. Match by URL so the refresh fills the stub instead of adding a
+        // second row for the same article.
+        let stored_guid = if existing.contains_key(&guid) {
+            guid.clone()
+        } else {
+            by_url.get(&url).cloned().unwrap_or_else(|| guid.clone())
+        };
         if existing
-            .get(&guid)
+            .get(&stored_guid)
             .is_some_and(|stored| stored.as_deref() == Some(entry_hash.as_str()))
         {
             continue;
@@ -443,12 +457,12 @@ pub async fn ingest(
         let thumb = crate::models::youtube_thumb(&guid)
             .or_else(|| crate::models::first_image(&content_html, &url));
 
-        if existing.contains_key(&guid) {
+        if existing.contains_key(&stored_guid) {
             // Only move a date backwards: a feed with no real date must not
             // keep pushing old posts to the top of Recent.
             sqlx::query(
                 "UPDATE posts SET title = ?, content_html = ?, summary = ?, author = ?,
-                 thumb_url = COALESCE(thumb_url, ?), content_hash = ?,
+                 thumb_url = COALESCE(NULLIF(thumb_url, ''), ?), content_hash = ?,
                  published_at = CASE WHEN ? < published_at THEN ? ELSE published_at END
                  WHERE feed_id = ? AND guid = ?",
             )
@@ -461,7 +475,7 @@ pub async fn ingest(
             .bind(&published)
             .bind(&published)
             .bind(feed_id)
-            .bind(&guid)
+            .bind(&stored_guid)
             .execute(pool)
             .await?;
         } else {
@@ -481,6 +495,7 @@ pub async fn ingest(
             .bind(&entry_hash)
             .execute(pool)
             .await?;
+            by_url.insert(url, guid);
             new_posts += 1;
         }
     }

@@ -1,3 +1,4 @@
+use crate::assets;
 use serde::Deserialize;
 
 pub const PAGE_SIZE: i64 = 24;
@@ -34,6 +35,15 @@ pub struct Feed {
 impl Feed {
     pub fn is_new(&self) -> bool {
         self.has_new_post != 0
+    }
+
+    /// Templates render these, so Blob-hosted assets get their absolute URL.
+    pub fn avatar(&self) -> Option<String> {
+        self.avatar_url.as_deref().map(assets::url)
+    }
+
+    pub fn banner(&self) -> Option<String> {
+        self.banner_url.as_deref().map(assets::url)
     }
 
     pub fn category_label(&self) -> &'static str {
@@ -134,6 +144,7 @@ impl PostRow {
     /// The row always has a thumb slot, so a missing poster must not collapse it.
     pub fn thumb_or_placeholder(&self) -> String {
         self.thumb()
+            .map(|thumb| assets::url(&thumb))
             .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
     }
 }
@@ -166,7 +177,7 @@ impl Post {
             return Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
         }
         let thumb = self.thumb_url.clone().filter(|url| !url.is_empty())?;
-        Some(cover_variant(&thumb))
+        Some(assets::url(&cover_variant(&thumb)))
     }
 
     /// Fallback for a cover whose 1200px sibling is missing.
@@ -174,17 +185,18 @@ impl Post {
         self.thumb_url
             .clone()
             .filter(|url| !url.is_empty())
+            .map(|thumb| assets::url(&thumb))
             .unwrap_or_else(|| PLACEHOLDER_IMAGE.to_string())
     }
 }
 
-/// Cached post images are written next to a 1200px copy of themselves.
+/// Cached post images are written next to a 1200px JPEG hero.
 fn cover_variant(url: &str) -> String {
     if !url.starts_with("/static/assets/posts/") {
         return url.to_string();
     }
     match url.rsplit_once('.') {
-        Some((stem, ext)) => format!("{stem}-1200.{ext}"),
+        Some((stem, _)) => format!("{stem}-1200.jpg"),
         None => url.to_string(),
     }
 }
@@ -207,6 +219,8 @@ pub struct TimelineQuery {
 #[derive(Debug, Deserialize)]
 pub struct FeedQuery {
     pub msg: Option<String>,
+    pub page: Option<i64>,
+    pub q: Option<String>,
 }
 
 pub struct FeedPage {
@@ -247,7 +261,7 @@ mod tests {
             post("guid", Some("/static/assets/posts/abc123.png"))
                 .reader_cover()
                 .as_deref(),
-            Some("/static/assets/posts/abc123-1200.png")
+            Some("/static/assets/posts/abc123-1200.jpg")
         );
         assert_eq!(
             post("guid", Some("https://cdn.example.com/hero.webp"))

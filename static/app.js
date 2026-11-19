@@ -22,22 +22,180 @@
     }
   }
 
-  var snackbar;
-  var snackbarTimer;
+  /* Toasts follow Sonner's defaults: 4s dismiss, bottom-right stack, hover
+     expands and pauses, swipe right/down to dismiss. */
+  var TOAST_MS = 4000;
+  var TOAST_GAP = 14;
+  var TOAST_MAX = 3;
+  var hoverCapable = window.matchMedia("(hover: hover)").matches;
 
-  function showSnackbar(message) {
-    if (!snackbar) {
-      snackbar = document.createElement("div");
-      snackbar.className = "snackbar";
-      snackbar.setAttribute("role", "status");
-      document.body.appendChild(snackbar);
+  var toaster = document.createElement("div");
+  toaster.className = "toaster";
+  toaster.setAttribute("aria-live", "polite");
+  document.body.appendChild(toaster);
+
+  var toasts = [];
+
+  function toastExpanded() {
+    return hoverCapable && toaster.matches(":hover");
+  }
+
+  // toasts[0] is the newest; every later toast sits above it.
+  function layoutToasts(expanded) {
+    toaster.classList.toggle("is-expanded", expanded);
+    var frontHeight = toasts.length ? toasts[0].height : 0;
+    var offset = 0;
+    toasts.forEach(function (t, index) {
+      var el = t.el;
+      if (index === 0) {
+        el.style.height = t.height + "px";
+        el.style.removeProperty("--toast-y");
+        el.style.removeProperty("--toast-scale");
+        el.classList.remove("is-collapsed");
+        offset = t.height + TOAST_GAP;
+        return;
+      }
+      if (expanded) {
+        el.style.height = t.height + "px";
+        el.style.setProperty("--toast-y", -offset + "px");
+        el.style.setProperty("--toast-scale", "1");
+        el.classList.remove("is-collapsed");
+        offset += t.height + TOAST_GAP;
+      } else {
+        el.style.height = frontHeight + "px";
+        el.style.setProperty("--toast-y", -(index * TOAST_GAP) + "px");
+        el.style.setProperty("--toast-scale", String(1 + index * 0.05));
+        el.classList.add("is-collapsed");
+      }
+    });
+  }
+
+  function dismiss(t, swiped) {
+    if (t.removed) return;
+    t.removed = true;
+    clearTimeout(t.timer);
+    var index = toasts.indexOf(t);
+    if (index !== -1) toasts.splice(index, 1);
+    t.el.style.pointerEvents = "none";
+    if (!swiped) {
+      t.el.style.setProperty("--toast-y", index === 0 ? "100%" : "40%");
+      t.el.style.opacity = "0";
     }
-    snackbar.textContent = message;
-    snackbar.classList.add("is-open");
-    clearTimeout(snackbarTimer);
-    snackbarTimer = setTimeout(function () {
-      snackbar.classList.remove("is-open");
-    }, 3000);
+    layoutToasts(toastExpanded());
+    setTimeout(function () {
+      t.el.remove();
+    }, 400);
+  }
+
+  function pauseToast(t) {
+    if (!t.timer) return;
+    clearTimeout(t.timer);
+    t.timer = null;
+    t.remaining = Math.max(0, t.remaining - (Date.now() - t.startedAt));
+  }
+
+  function resumeToast(t) {
+    if (t.removed || t.timer) return;
+    t.startedAt = Date.now();
+    t.timer = setTimeout(function () {
+      dismiss(t);
+    }, t.remaining);
+  }
+
+  if (hoverCapable) {
+    toaster.addEventListener("mouseenter", function () {
+      toasts.forEach(pauseToast);
+      layoutToasts(true);
+    });
+    toaster.addEventListener("mouseleave", function () {
+      layoutToasts(false);
+      toasts.forEach(resumeToast);
+    });
+  }
+
+  function attachSwipe(t) {
+    var el = t.el;
+    var start = null;
+    var axis = null;
+    function dampen(value) {
+      return value / (1.5 + Math.abs(value) / 20);
+    }
+    el.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 || t.removed) return;
+      start = { x: event.clientX, y: event.clientY, at: Date.now() };
+      axis = null;
+      el.setPointerCapture(event.pointerId);
+      el.classList.add("is-swiping");
+    });
+    el.addEventListener("pointermove", function (event) {
+      if (!start) return;
+      var dx = event.clientX - start.x;
+      var dy = event.clientY - start.y;
+      if (!axis && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+        axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+      if (!axis) return;
+      el.style.setProperty("--swipe-x", (axis === "x" ? Math.max(0, dx) : dampen(dx)) + "px");
+      el.style.setProperty("--swipe-y", (axis === "y" ? Math.max(0, dy) : dampen(dy)) + "px");
+    });
+    el.addEventListener("pointerup", function (event) {
+      if (!start) return;
+      var dx = event.clientX - start.x;
+      var dy = event.clientY - start.y;
+      var amount = axis === "x" ? dx : dy;
+      var velocity = Math.abs(amount) / Math.max(1, Date.now() - start.at);
+      var swiped = axis && amount > 0 && (Math.abs(amount) >= 45 || velocity > 0.11);
+      start = null;
+      el.classList.remove("is-swiping");
+      if (swiped) {
+        el.style.setProperty("--swipe-x", axis === "x" ? "calc(100% + 48px)" : "0px");
+        el.style.setProperty("--swipe-y", axis === "y" ? "calc(100% + 48px)" : "0px");
+        dismiss(t, true);
+      } else {
+        el.style.setProperty("--swipe-x", "0px");
+        el.style.setProperty("--swipe-y", "0px");
+      }
+    });
+    el.addEventListener("pointercancel", function () {
+      if (!start) return;
+      start = null;
+      el.classList.remove("is-swiping");
+      el.style.setProperty("--swipe-x", "0px");
+      el.style.setProperty("--swipe-y", "0px");
+    });
+  }
+
+  function showToast(message) {
+    if (toasts.length >= TOAST_MAX) {
+      var oldest = toasts.pop();
+      clearTimeout(oldest.timer);
+      oldest.el.remove();
+    }
+    var el = document.createElement("div");
+    el.className = "toast";
+    el.setAttribute("role", "status");
+    var text = document.createElement("span");
+    text.textContent = message;
+    el.appendChild(text);
+    toaster.appendChild(el);
+    var t = {
+      el: el,
+      // shortcut: measured once; a resize during the 4s lifetime keeps the old height.
+      height: el.offsetHeight,
+      remaining: TOAST_MS,
+      startedAt: 0,
+      timer: null,
+      removed: false,
+    };
+    toasts.unshift(t);
+    el.style.height = t.height + "px";
+    attachSwipe(t);
+    layoutToasts(toastExpanded());
+    el.classList.add("is-mounted");
+    t.startedAt = Date.now();
+    t.timer = setTimeout(function () {
+      dismiss(t);
+    }, TOAST_MS);
   }
 
   var subs = load(SUBS).map(Number).filter(Number.isInteger);
@@ -58,7 +216,7 @@
       save(SUBS, subs);
       paint();
       if (!wasOn) {
-        showSnackbar((button.dataset.feedTitle || "Feed") + " is added to your feed.");
+        showToast((button.dataset.feedTitle || "Feed") + " is added to your feed.");
       }
     });
   });
@@ -176,7 +334,55 @@
     });
   }
 
-  var menuToggle = document.querySelector(".menu-toggle");
+  var barSearchToggle = document.querySelector(".bar-search-toggle");
+  var barSearchForm = document.querySelector(".topbar-search");
+  var barSearchActions = document.querySelector(".mobile-bar-actions");
+  if (barSearchToggle && barSearchForm && barSearchActions) {
+    var barSearchHome = barSearchForm.parentElement;
+    var barSearchOpen = false;
+    var barSearchTimer;
+
+    function setBarSearch(open) {
+      clearTimeout(barSearchTimer);
+      barSearchOpen = open;
+      barSearchToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      barSearchToggle.setAttribute("aria-label", open ? "Close search" : "Search");
+      if (open) {
+        barSearchForm.classList.add("is-collapsed");
+        barSearchActions.insertBefore(barSearchForm, barSearchToggle);
+        barSearchForm.offsetWidth; // flush the collapsed width so the expand runs
+        barSearchForm.classList.remove("is-collapsed");
+        barSearchForm.querySelector("input").focus();
+      } else {
+        barSearchForm.classList.add("is-collapsed");
+        barSearchTimer = setTimeout(function () {
+          barSearchForm.classList.remove("is-collapsed");
+          barSearchHome.appendChild(barSearchForm);
+        }, 200);
+      }
+    }
+
+    barSearchToggle.addEventListener("click", function () {
+      setBarSearch(!barSearchOpen);
+    });
+    barSearchForm.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && barSearchOpen) {
+        setBarSearch(false);
+        barSearchToggle.focus();
+      }
+    });
+    window.addEventListener("resize", function () {
+      if (!barSearchOpen || window.innerWidth <= 1023) return;
+      clearTimeout(barSearchTimer);
+      barSearchOpen = false;
+      barSearchToggle.setAttribute("aria-expanded", "false");
+      barSearchToggle.setAttribute("aria-label", "Search");
+      barSearchForm.classList.remove("is-collapsed");
+      barSearchHome.appendChild(barSearchForm);
+    });
+  }
+
+  var menuToggle = document.getElementById("menu-toggle");
   var mobileMenu = document.getElementById("mobile-menu");
   if (menuToggle && mobileMenu) {
     var menuAnimation;
@@ -229,6 +435,18 @@
         menuToggle.focus();
       }
     });
+  }
+
+  var chips = document.querySelector(".chips");
+  if (chips && chips.parentElement) {
+    var filterRow = chips.parentElement;
+    var updateFade = function () {
+      var max = chips.scrollWidth - chips.clientWidth;
+      filterRow.toggleAttribute("data-fade", max > 1 && chips.scrollLeft < max - 1);
+    };
+    chips.addEventListener("scroll", updateFade, { passive: true });
+    window.addEventListener("resize", updateFade);
+    updateFade();
   }
 
   var timeline = document.getElementById("timeline");

@@ -234,6 +234,65 @@ async fn ingest_repairs_a_fallback_date() {
 }
 
 #[tokio::test]
+async fn ingest_fills_a_stub_by_url() {
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://example.com/feed.xml", "active").await;
+    let url = "https://example.com/posts/hello";
+    sqlx::query(
+        "INSERT INTO posts (feed_id, guid, url, title, content_html, summary, thumb_url,
+         published_at) VALUES (?, ?, ?, 'Hello world', '', '', '', '2024-01-01 00:00:00')",
+    )
+    .bind(id)
+    .bind(url)
+    .bind(url)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let xml = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+        <item><guid isPermaLink="false">?p=42</guid><link>{url}</link>
+        <title>Hello world!</title>
+        <description><![CDATA[<p>Real body</p><img src="https://example.com/x.jpg">]]></description>
+        <pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate></item></channel></rss>"#
+    );
+    let feed = crate::worker::discover::parse_feed(xml.as_bytes()).unwrap();
+    let new = fetch::ingest(&state.pool, id, &feed, "https://example.com")
+        .await
+        .unwrap();
+    assert_eq!(new, 0);
+    assert_eq!(post_count(&state.pool, id).await, 1);
+    let row: (String, String, String) =
+        sqlx::query_as("SELECT guid, title, thumb_url FROM posts WHERE feed_id = ?")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(row.0, url, "the stub guid must survive the refresh");
+    assert_eq!(row.1, "Hello world!");
+    assert_eq!(row.2, "https://example.com/x.jpg");
+}
+
+#[tokio::test]
+async fn ingest_resolves_relative_links() {
+    let state = test_state().await;
+    let id = add_feed(&state.pool, "https://pjonori.blog/rss.xml", "active").await;
+    let xml = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+        <item><link>/posts/hello</link><title>Hello</title>
+        <pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate></item></channel></rss>"#;
+    let feed = crate::worker::discover::parse_feed(xml.as_bytes()).unwrap();
+    fetch::ingest(&state.pool, id, &feed, "https://pjonori.blog")
+        .await
+        .unwrap();
+    let url: String = sqlx::query_scalar("SELECT url FROM posts WHERE feed_id = ?")
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(url, "https://pjonori.blog/posts/hello");
+}
+
+#[tokio::test]
 async fn refresh_handles_304_as_success() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -752,7 +811,7 @@ async fn cache_and_security_headers_are_scoped() {
     let headers = page.headers();
     assert_eq!(
         headers.get("cache-control").unwrap().to_str().unwrap(),
-        "public, s-maxage=300, stale-while-revalidate=600"
+        "public, s-maxage=600, stale-while-revalidate=86400"
     );
     for (name, value) in [
         ("x-content-type-options", "nosniff"),
@@ -766,18 +825,27 @@ async fn cache_and_security_headers_are_scoped() {
         assert_eq!(headers.get(name).unwrap().to_str().unwrap(), value);
     }
 
-    // Health checks and API responses never get the shared-cache policy.
-    for path in [
-        "/healthz".to_string(),
-        format!("/api/timeline?feeds={feed}"),
-    ] {
-        let response = client.get(format!("{base}{path}")).send().await.unwrap();
-        assert_eq!(response.status(), 200, "{path}");
-        assert!(
-            response.headers().get("cache-control").is_none(),
-            "{path} must not be cached"
-        );
-    }
+    // Health checks never get the shared-cache policy.
+    let health = client.get(format!("{base}/healthz")).send().await.unwrap();
+    assert_eq!(health.status(), 200);
+    assert!(health.headers().get("cache-control").is_none());
+
+    // The timeline is a public GET, so htmx polls can share a short cache.
+    let timeline = client
+        .get(format!("{base}/api/timeline?feeds={feed}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(timeline.status(), 200);
+    assert_eq!(
+        timeline
+            .headers()
+            .get("cache-control")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "public, s-maxage=60, stale-while-revalidate=300"
+    );
 }
 
 // ---------- M5: submission ----------
@@ -1128,7 +1196,7 @@ fn youtube_thumb_is_derived_from_guid() {
     post.guid = "guid".into();
     post.thumb_url = None;
     assert!(post.thumb().is_none());
-    // The backfill writes '' for "no body image"; render it as a placeholder.
+    // Link-only stubs store '' for "no body image"; render it as a placeholder.
     post.thumb_url = Some(String::new());
     assert_eq!(
         post.thumb_or_placeholder(),
@@ -1221,6 +1289,113 @@ async fn feed_page_renders_youtube_thumbnail() {
         .unwrap();
     assert!(html.contains("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg"));
     assert!(html.contains(r#"width="96" height="54""#));
+}
+
+#[tokio::test]
+async fn feed_pages_paginate_and_clamp() {
+    let (base, state) = spawn_app().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    for index in 0..55 {
+        add_post(
+            &state.pool,
+            id,
+            &format!("p-{index}"),
+            &format!("Post {index}"),
+            &format!("2025-01-{:02} 10:00:00", index % 28 + 1),
+        )
+        .await;
+    }
+    async fn page(client: &Client, base: &str, id: i64, page: i64) -> String {
+        client
+            .get(format!("{base}/f/{id}?page={page}"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    }
+
+    let client = Client::new();
+    let first = page(&client, &base, id, 1).await;
+    assert_eq!(first.matches("data-post-id=").count(), 50);
+    assert!(first.contains(&format!("/f/{id}?page=2")));
+    assert!(!first.contains(">Newer<"));
+
+    let second = page(&client, &base, id, 2).await;
+    assert_eq!(second.matches("data-post-id=").count(), 5);
+    assert!(second.contains(&format!("/f/{id}?page=1")));
+    assert!(!second.contains(">Older<"));
+
+    // A page past the end shows the last page, not an empty list.
+    let clamped = page(&client, &base, id, 99).await;
+    assert_eq!(clamped.matches("data-post-id=").count(), 5);
+    assert!(clamped.contains(&format!("/f/{id}?page=1")));
+    assert_eq!(
+        page(&client, &base, id, 0)
+            .await
+            .matches("data-post-id=")
+            .count(),
+        50
+    );
+}
+
+#[tokio::test]
+async fn feed_search_filters_posts_and_renders_a_fragment() {
+    let (base, state) = spawn_app().await;
+    let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
+    add_post(
+        &state.pool,
+        id,
+        "a",
+        "Rust ownership",
+        "2025-01-01 00:00:00",
+    )
+    .await;
+    add_post(
+        &state.pool,
+        id,
+        "b",
+        "Design systems",
+        "2025-01-02 00:00:00",
+    )
+    .await;
+    let client = Client::new();
+
+    let html = client
+        .get(format!("{base}/f/{id}?q=rust"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("Rust ownership"));
+    assert!(!html.contains("Design systems"));
+    assert!(html.contains(r#"value="rust""#));
+
+    let fragment = client
+        .get(format!("{base}/f/{id}/posts?q=design"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(fragment.contains(r#"id="posts""#));
+    assert!(fragment.contains("Design systems"));
+    assert!(!fragment.contains("Rust ownership"));
+    assert!(!fragment.contains("Topbar"));
+
+    let empty = client
+        .get(format!("{base}/f/{id}?q=missing"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(empty.contains("No posts match"));
 }
 
 #[tokio::test]

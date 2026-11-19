@@ -86,12 +86,26 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
 
 /// Many personal sites list their posts in HTML but publish no RSS. Build a
 /// synthetic Atom feed from the largest group of same-site article links.
+/// Inline counters ("1,506 views", "5 min read") are UI, not part of a title.
+fn is_counter(text: &str) -> bool {
+    let rest = text.trim_start_matches(|c: char| {
+        c.is_ascii_digit() || c == ',' || c == '.' || c.is_whitespace()
+    });
+    matches!(
+        rest.to_ascii_lowercase().as_str(),
+        "views" | "view" | "reads" | "read" | "comments" | "comment" | "min read" | "min watch"
+    )
+}
+
 pub(crate) fn html_feed(html: &str, base: &Url) -> Option<feed_rs::model::Feed> {
     use std::collections::HashMap;
 
     let document = Html::parse_document(html);
     let selector = Selector::parse("a[href]").ok()?;
+    let meta_selector = Selector::parse("time, span").ok()?;
+    let date_selector = Selector::parse("time[datetime]").ok()?;
     let mut by_prefix: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let mut dated: Vec<(String, String, DateTime<Utc>)> = Vec::new();
     for element in document.select(&selector) {
         let Some(href) = element.value().attr("href") else {
             continue;
@@ -118,26 +132,55 @@ pub(crate) fn html_feed(html: &str, base: &Url) -> Option<feed_rs::model::Feed> 
         if segments.next().is_none() || ignored_section(section) {
             continue;
         }
-        let title = element
-            .text()
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        // List rows put the date in a <time> and counters in a <span> inside
+        // the link, so the anchor's text reads "Post2026.10.22" or
+        // "Post1,506 views". Remove that metadata and keep the title.
+        let mut title: String = element.text().collect();
+        for node in element.select(&meta_selector) {
+            let stamp: String = node.text().collect();
+            let stamp = stamp.split_whitespace().collect::<Vec<_>>().join(" ");
+            let is_meta = node.value().name() == "time" || is_counter(&stamp);
+            if is_meta
+                && !stamp.is_empty()
+                && let Some(at) = title.rfind(&stamp)
+            {
+                title.replace_range(at..at + stamp.len(), "");
+            }
+        }
+        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
         if !(4..=160).contains(&title.len()) {
             continue;
+        }
+        if let Some(date) = element
+            .select(&date_selector)
+            .find_map(|node| node.value().attr("datetime").and_then(parse_stamp))
+        {
+            dated.push((url.to_string(), title.clone(), date));
         }
         by_prefix
             .entry(section.to_string())
             .or_default()
             .insert(url.to_string(), title);
     }
-    let (_, links) = by_prefix.into_iter().max_by_key(|(_, links)| links.len())?;
+    // An archive page dates each row, which marks the real article set: keep
+    // every dated link, even across sections (posts plus another collection).
+    let mut links: Vec<(String, String, Option<DateTime<Utc>>)> = if dated.len() >= 3 {
+        dated
+            .into_iter()
+            .map(|(url, title, date)| (url, title, Some(date)))
+            .collect()
+    } else {
+        let (_, group) = by_prefix.into_iter().max_by_key(|(_, links)| links.len())?;
+        group
+            .into_iter()
+            .map(|(url, title)| (url, title, None))
+            .collect()
+    };
     if links.len() < 3 {
         return None;
     }
-    let mut links: Vec<(String, String)> = links.into_iter().collect();
-    links.sort();
+    links.sort_by(|a, b| a.0.cmp(&b.0));
+    links.dedup_by(|a, b| a.0 == b.0);
 
     let title = Html::parse_document(html)
         .select(&Selector::parse("title").ok()?)
@@ -189,7 +232,7 @@ async fn sitemap_feed(client: &Client, base: &Url) -> Option<feed_rs::model::Fee
             break;
         }
     }
-    let mut links: Vec<(String, String)> = locs
+    let mut links: Vec<(String, String, Option<DateTime<Utc>>)> = locs
         .into_iter()
         .filter_map(|loc| {
             let url = Url::parse(&loc).ok()?;
@@ -208,7 +251,7 @@ async fn sitemap_feed(client: &Client, base: &Url) -> Option<feed_rs::model::Fee
             if !(3..=120).contains(&title.len()) {
                 return None;
             }
-            Some((url.to_string(), title))
+            Some((url.to_string(), title, None))
         })
         .collect();
     links.sort();
@@ -254,13 +297,49 @@ fn reserved_page(slug: &str) -> bool {
             | "sitemap"
             | "privacy"
             | "terms"
+            | "checkout"
+            | "cart"
+            | "store"
+            | "support"
+            | "pricing"
+            | "subscribe"
+            | "newsletter"
+            | "newsletters"
+            | "community"
+            | "forum"
+            | "jobs"
+            | "careers"
+            | "advertise"
+            | "sponsors"
+            | "team"
+            | "download"
+            | "links"
+            // Personal-site logs that sitemaps list beside real writing.
+            | "listening"
+            | "stack"
+            | "sites"
+            | "activity"
+            | "hn"
     )
+}
+
+/// A list row's machine-readable stamp: `<time datetime>` is either a date or
+/// a full timestamp.
+fn parse_stamp(value: &str) -> Option<DateTime<Utc>> {
+    let value = value.trim();
+    if let Ok(stamp) = DateTime::parse_from_rfc3339(value) {
+        return Some(stamp.with_timezone(&Utc));
+    }
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .ok()?
+        .and_hms_opt(0, 0, 0)
+        .map(|day| day.and_utc())
 }
 
 fn synthetic_feed(
     title: &str,
     base: &Url,
-    links: Vec<(String, String)>,
+    links: Vec<(String, String, Option<DateTime<Utc>>)>,
 ) -> Option<feed_rs::model::Feed> {
     let now = chrono::Utc::now().to_rfc3339();
     let mut xml = format!(
@@ -269,9 +348,12 @@ fn synthetic_feed(
         xml_escape(base.as_str()),
         now
     );
-    for (url, title) in links.iter().take(100) {
+    for (url, title, date) in links.iter().take(1000) {
+        let published = date
+            .map(|date| format!("<published>{}</published>", date.to_rfc3339()))
+            .unwrap_or_default();
         xml.push_str(&format!(
-            "<entry><id>{}</id><title>{}</title><link href=\"{}\"/><updated>{}</updated></entry>",
+            "<entry><id>{}</id><title>{}</title><link href=\"{}\"/>{published}<updated>{}</updated></entry>",
             xml_escape(url),
             xml_escape(title),
             xml_escape(url),
@@ -291,6 +373,7 @@ fn ignored_section(section: &str) -> bool {
             | "tags"
             | "category"
             | "categories"
+            | "archive"
             | "author"
             | "page"
             | "search"
@@ -973,6 +1056,77 @@ mod tests {
             extract_icons("<p>no icons</p>", &base),
             vec!["https://example.com/favicon.ico"]
         );
+    }
+
+    #[test]
+    fn html_feed_drops_the_date_from_link_text() {
+        let base = Url::parse("https://example.com/thoughts").unwrap();
+        let html = r#"<html><head><title>Blog</title></head><body><ul>
+            <li><a href="/thoughts/one"><span>First post</span>
+              <span class="dot"></span><time>2026.10.22</time></a></li>
+            <li><a href="/thoughts/two">Second post</a></li>
+            <li><a href="/thoughts/three">Third post</a></li>
+        </ul></body></html>"#;
+        let feed = super::html_feed(html, &base).unwrap();
+        let titles: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.title.as_ref().unwrap().content.as_str())
+            .collect();
+        assert!(titles.contains(&"First post"));
+        assert!(!titles.iter().any(|title| title.contains("2026")));
+    }
+
+    #[test]
+    fn html_feed_drops_view_counts_from_link_text() {
+        let base = Url::parse("https://benja.dev/writing").unwrap();
+        let html = r#"<html><head><title>Writing</title></head><body><ul>
+            <li><a href="/writing/one"><span>First post</span>
+              <span class="count">1,506 views</span></a></li>
+            <li><a href="/writing/two">Second post</a></li>
+            <li><a href="/writing/three">Third post</a></li>
+            <li><a href="/writing/four">My views on things</a></li>
+        </ul></body></html>"#;
+        let feed = super::html_feed(html, &base).unwrap();
+        let titles: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.title.as_ref().unwrap().content.as_str())
+            .collect();
+        assert!(titles.contains(&"First post"));
+        assert!(titles.contains(&"My views on things"));
+        assert!(!titles.iter().any(|title| title.contains("1,506")));
+    }
+
+    #[test]
+    fn html_feed_keeps_every_dated_entry_across_sections() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let html = r#"<html><head><title>Archive</title></head><body>
+            <nav id="archive"><h3><span class="year">2026</span></h3>
+            <a class="archive-item" href="/thoughts/one"><p>First thought</p>
+              <hr><time datetime="2026-11-17">17th</time></a>
+            <a class="archive-item" href="/walks/walk-one"><p>A walk</p>
+              <hr><time datetime="2026-11-10">10th</time></a>
+            <h3><span class="year">2026</span></h3>
+            <a class="archive-item" href="/thoughts/two"><p>Second thought</p>
+              <hr><time datetime="2026-10-02">2nd</time></a>
+            </nav></body></html>"#;
+        let feed = super::html_feed(html, &base).unwrap();
+        assert_eq!(feed.entries.len(), 3);
+        let titles: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.title.as_ref().unwrap().content.as_str())
+            .collect();
+        assert!(titles.contains(&"A walk"));
+        assert!(!titles.iter().any(|title| title.contains("17th")));
+        let mut dates: Vec<String> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.published.unwrap().format("%Y-%m-%d").to_string())
+            .collect();
+        dates.sort();
+        assert_eq!(dates, ["2026-10-02", "2026-11-10", "2026-11-17"]);
     }
 
     #[test]

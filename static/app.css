@@ -44,10 +44,12 @@ img { max-width: 100%; }
 }
 
 /* Page load: sidebar slides in from the left, header from the top.
-   Trigger: initial page paint. Easing: decelerate. */
+   Trigger: first page view of the tab; sidebar navigation must not replay it.
+   Easing: decelerate. */
 @media (prefers-reduced-motion: no-preference) {
-  .sidebar { animation: slide-in-left 360ms cubic-bezier(.2, 0, 0, 1) both; }
-  .topbar, .mobile-bar {
+  html[data-first-load] .sidebar { animation: slide-in-left 360ms cubic-bezier(.2, 0, 0, 1) both; }
+  html[data-first-load] .topbar,
+  html[data-first-load] .mobile-bar {
     animation: slide-in-top 280ms cubic-bezier(.2, 0, 0, 1) 80ms both;
   }
 }
@@ -273,6 +275,7 @@ img { max-width: 100%; }
   gap: var(--space-6);
 }
 .chip {
+  flex: none;
   font-size: var(--font-size-13);
   line-height: var(--leading-none);
   color: var(--color-ink-secondary);
@@ -460,28 +463,62 @@ img { max-width: 100%; }
 .subscribe[aria-pressed="true"] .subscribe-check { display: block; }
 .button:active, .button-secondary:active, .subscribe:active { scale: .96; }
 
-/* Snackbar: brief confirmation after a subscribe action. */
-.snackbar {
+/* Toasts — Sonner behaviour: bottom-right, newest in front, older cards stack
+   behind, hover expands and pauses the dismiss timer, swipe right/down to
+   dismiss. */
+.toaster {
   position: fixed;
-  left: 50%;
-  bottom: calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
+  right: var(--space-32);
+  bottom: calc(var(--space-32) + env(safe-area-inset-bottom, 0px));
   z-index: 60;
-  max-width: calc(100vw - var(--space-32));
-  padding: var(--space-10) var(--space-16);
-  border-radius: var(--radius-8);
-  background: var(--color-ink);
-  color: var(--color-ink-inverse);
-  font-size: var(--font-size-13);
-  text-align: center;
-  box-shadow: var(--shadow-md);
-  opacity: 0;
-  transform: translate(-50%, 12px);
+  width: 356px;
   pointer-events: none;
-  transition-property: opacity, transform;
-  transition-duration: var(--duration-medium);
-  transition-timing-function: var(--ease-emphasized);
 }
-.snackbar.is-open { opacity: 1; transform: translate(-50%, 0); }
+.toast {
+  --toast-y: 100%;
+  --toast-scale: 1;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  padding: var(--space-16);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-8);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--font-size-13);
+  line-height: var(--leading-relaxed);
+  box-shadow: 0 4px 12px rgb(0 0 0 / .1);
+  opacity: 0;
+  pointer-events: auto;
+  touch-action: none;
+  transform: translateY(var(--toast-y)) translate(var(--swipe-x, 0px), var(--swipe-y, 0px))
+    scale(var(--toast-scale));
+  transition: transform 400ms var(--ease-standard), opacity 400ms var(--ease-standard),
+    height 400ms var(--ease-standard);
+}
+.toast.is-mounted { --toast-y: 0px; opacity: 1; }
+.toast.is-collapsed { overflow: hidden; }
+.toast.is-collapsed > * { opacity: 0; }
+.toast > * { transition: opacity 400ms var(--ease-standard); }
+.toast.is-swiping { transition: none; }
+/* Bridge the 14px gap so moving between expanded toasts keeps them open. */
+.toaster.is-expanded .toast::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 15px;
+}
+@media (max-width: 639px) {
+  .toaster {
+    left: var(--space-16);
+    right: var(--space-16);
+    bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+    width: auto;
+  }
+}
 
 /* Post lists */
 .post-list { border-top: 1px solid var(--color-border); }
@@ -636,6 +673,32 @@ img { max-width: 100%; }
   color: var(--color-on-scrim);
 }
 .feed-cover .subscribe:hover { background: oklch(100% 0 0/.15); }
+/* Back to the directory: floats over a cover, inline above a plain head. */
+.feed-back {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  color: var(--color-on-scrim);
+  background: oklch(0% 0 0/.35);
+  transition: background var(--duration-base) var(--ease-standard),
+              color var(--duration-base) var(--ease-standard);
+}
+.feed-back:hover { background: oklch(0% 0 0/.55); }
+.feed-back-icon { width: 18px; height: 18px; }
+.feed-cover .feed-back {
+  position: absolute;
+  top: var(--space-16);
+  left: var(--space-16);
+  z-index: 2;
+}
+/* Banner-less feeds: use the secondary button so the control matches the
+   rest of the system instead of a one-off filled pill. */
+.feed-back.is-plain {
+  padding: 0;
+  margin-bottom: var(--space-12);
+}
 .feed-desc {
   margin: var(--space-8) 0 0;
   font-size: var(--font-size-14);
@@ -1054,14 +1117,24 @@ img { max-width: 100%; }
   .reader-metarow { grid-template-columns: minmax(0, 1fr); }
   .reader-cover { border-radius: var(--radius-12); max-height: 300px; }
   .reader-cover img { max-height: 300px; }
-  .feed-cover { display: block; min-height: 0; background: none; }
-  .feed-cover-img {
-    position: static;
-    height: 120px;
-    border-radius: var(--radius-12);
-  }
+  .feed-cover { display: block; min-height: 0; background: none; border-radius: 0; overflow: visible; }
+  .feed-cover-img { display: none; }
   .feed-cover::after { display: none; }
-  .feed-cover-body { padding: var(--space-12) 0 0; color: var(--color-ink); }
+  /* Phones drop the banner and use the same secondary back button as feeds
+     that never had artwork. */
+  .feed-cover .feed-back {
+    position: static;
+    padding: 0;
+    margin-bottom: var(--space-12);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-8);
+    color: var(--color-ink);
+    background: var(--color-surface);
+  }
+  .feed-cover .feed-back:hover { background: var(--color-fill-hover); }
+  .feed-cover .feed-back:active { scale: .96; }
+  .feed-cover-body { padding: 0; color: var(--color-ink); }
+  .feed-cover .feed-desc { color: var(--color-ink-secondary); }
   .feed-cover-avatar { width: 40px; height: 40px; outline-color: var(--color-border); }
   .feed-cover-title { font-size: var(--font-size-24); }
   .feed-cover-meta { color: var(--color-ink-secondary); }
@@ -1077,21 +1150,99 @@ img { max-width: 100%; }
 @media (min-width: 1300px) {
   .feed-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+/* Wide: full-bleed shell, the content column is a card that scrolls inside
+   the viewport instead of growing the page. */
+@media (min-width: 1200px) {
+  .app-shell { max-width: none; margin-inline: 0; padding: 0; gap: 0; }
+  .app-main {
+    height: calc(100vh - var(--space-16));
+    min-height: 0;
+    margin: var(--space-8);
+    padding: var(--space-16) var(--space-24) var(--space-24);
+    background: var(--color-surface-solid);
+    border: 1px solid var(--color-border);
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+    border-radius: var(--radius-12);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none; /* card stays clean; native bars only render inside */
+  }
+  .app-main::-webkit-scrollbar { display: none; }
+  /* Top pad = app-main's margin + border + top padding, so the wordmark sits
+     on the same line as the topbar's title and search. */
+  .sidebar {
+    top: 0;
+    min-height: calc(100vh - var(--space-16));
+    padding: calc(var(--space-8) + var(--space-16) + 1px) var(--space-16) 0;
+  }
+}
 @media (max-width: 1023px) {
   .app-shell { display: block; }
   .sidebar { display: none; }
-  .topbar { flex-wrap: wrap; padding-block: 0 var(--space-16); }
+  /* Bar search + hidden theme toggle leave the actions row empty on mobile. */
+  .topbar { flex-wrap: wrap; row-gap: 0; padding-block: 0 var(--space-16); }
   .topbar-actions { width: 100%; }
   .topbar-search { width: auto; flex: 1; }
   .sort-form { display: none; }
+  /* Chips stay on one line and scroll; fade the edge while more remain. */
+  .chips {
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+  .filter-row { position: relative; }
+  .filter-row::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    width: var(--space-40);
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--color-surface));
+    opacity: 0;
+    transition: opacity var(--duration-base) var(--ease-standard);
+  }
+  .filter-row[data-fade]::after { opacity: 1; }
   .mobile-bar {
     position: relative;
     z-index: 30;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: var(--space-16);
     padding-block: var(--space-4) var(--space-16);
   }
+  .mobile-bar-actions {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-16);
+    min-width: 0;
+  }
+  /* The bar's search icon moves the page's search form into the bar and grows
+     it open; without JS the form simply stays in the topbar. */
+  html:not([data-bar-search]) .bar-search-toggle { display: none; }
+  html[data-bar-search] .topbar-actions .topbar-search { display: none; }
+  .mobile-bar-actions .topbar-search {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    transition: flex-grow var(--duration-medium) var(--ease-standard),
+      opacity var(--duration-medium) var(--ease-standard);
+  }
+  .mobile-bar-actions .topbar-search.is-collapsed {
+    flex-grow: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mobile-bar-actions .search-input { padding-block: var(--space-4); }
   .mobile-nav {
     position: absolute;
     top: calc(100% - var(--space-8));
@@ -1115,4 +1266,11 @@ img { max-width: 100%; }
   }
   .mobile-link:hover { background: var(--color-fill-hover); color: var(--color-ink); }
   .mobile-link.is-active { color: var(--color-ink); font-weight: var(--font-weight-medium); }
+  /* The theme switch lives at the bottom of the mobile menu. */
+  .mobile-theme {
+    margin-top: var(--space-8);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--color-border);
+  }
+  .topbar-actions .theme-toggle { display: none; }
 }

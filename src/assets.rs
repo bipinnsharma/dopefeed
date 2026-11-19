@@ -1,6 +1,7 @@
 //! Local copies of remote images, so a feed's face, cover and post posters are
 //! served from disk and the remote host is touched once.
 
+use crate::blob;
 use crate::worker::ssrf;
 use image::{DynamicImage, ImageFormat, codecs::jpeg::JpegEncoder};
 use reqwest::{
@@ -18,6 +19,8 @@ pub const DIR: &str = "static/assets";
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Files already at their target width and this small are left alone.
 const SMALL_BYTES: u64 = 100 * 1024;
+/// Covers and banners are decorative heroes; keep each one under this size.
+const MAX_ASSET_BYTES: u64 = 200 * 1024;
 
 /// Returns a public `/static/assets/...` path once the image is on disk.
 /// Repeat calls stat the file instead of fetching again.
@@ -56,23 +59,31 @@ pub async fn cache_in(dir: &Path, client: &Client, url: &str, kind: &str) -> Opt
     };
     // Undecodable bytes (html errors, odd formats) keep the original file.
     let Ok(image) = image::load_from_memory(&fetched.body) else {
-        fs::write(dir.join(kind).join(format!("{stem}.{ext}")), &fetched.body)
+        let name = format!("{stem}.{ext}");
+        fs::write(dir.join(kind).join(&name), &fetched.body)
             .await
             .ok()?;
+        let content_type = blob::content_type(&name);
+        blob::put(client, &format!("{kind}/{name}"), fetched.body, content_type).await;
         return Some(public_path(kind, &stem, ext));
     };
     let (data, out_ext) = encode(&image, width)?;
-    fs::write(dir.join(kind).join(format!("{stem}.{out_ext}")), &data)
-        .await
-        .ok()?;
+    let name = format!("{stem}.{out_ext}");
+    fs::write(dir.join(kind).join(&name), &data).await.ok()?;
+    blob::put(client, &format!("{kind}/{name}"), data, blob::content_type(&name)).await;
     if kind == "posts" {
-        let (cover, cover_ext) = encode(&image, 1200)?;
-        fs::write(
-            dir.join(kind).join(format!("{stem}-1200.{cover_ext}")),
-            &cover,
+        let (cover, cover_ext) = encode_cover(&image, 1200)?;
+        let cover_name = format!("{stem}-1200.{cover_ext}");
+        fs::write(dir.join(kind).join(&cover_name), &cover)
+            .await
+            .ok()?;
+        blob::put(
+            client,
+            &format!("{kind}/{cover_name}"),
+            cover,
+            blob::content_type(&cover_name),
         )
-        .await
-        .ok()?;
+        .await;
     }
     Some(public_path(kind, &stem, out_ext))
 }
@@ -106,6 +117,30 @@ fn encode(image: &DynamicImage, width: u32) -> Option<(Vec<u8>, &'static str)> {
     }
 }
 
+/// Covers and banners are decorative heroes, so they are always JPEG on white:
+/// a transparent 1200px PNG easily runs several megabytes. The width steps down
+/// until the file fits `MAX_ASSET_BYTES`.
+fn encode_cover(image: &DynamicImage, width: u32) -> Option<(Vec<u8>, &'static str)> {
+    let mut width = width;
+    loop {
+        let scaled = image.thumbnail(width, u32::MAX);
+        let mut canvas = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            scaled.width(),
+            scaled.height(),
+            image::Rgba([255, 255, 255, 255]),
+        ));
+        image::imageops::overlay(&mut canvas, &scaled, 0, 0);
+        let mut out = Vec::new();
+        JpegEncoder::new_with_quality(&mut out, 82)
+            .encode_image(&DynamicImage::ImageRgb8(canvas.to_rgb8()))
+            .ok()?;
+        if out.len() as u64 <= MAX_ASSET_BYTES || width <= 400 {
+            return Some((out, "jpg"));
+        }
+        width = width * 2 / 3;
+    }
+}
+
 /// Only formats a browser renders inertly; SVG can carry script.
 fn image_ext(content_type: &str) -> Option<&'static str> {
     match content_type
@@ -127,6 +162,15 @@ fn image_ext(content_type: &str) -> Option<&'static str> {
 
 fn public_path(kind: &str, stem: &str, ext: &str) -> String {
     format!("/static/assets/{kind}/{stem}.{ext}")
+}
+
+/// Browser URL for a stored asset path. Blob serves it when configured, so the
+/// DB keeps local paths and the same code works with and without a store.
+pub fn url(path: &str) -> String {
+    match (path.strip_prefix("/static/assets/"), blob::base()) {
+        (Some(rest), Some(base)) => format!("{base}/{rest}"),
+        _ => path.to_string(),
+    }
 }
 
 /// Downloads any still-remote post poster for one feed and rewrites the row.
@@ -232,7 +276,6 @@ async fn localize_one(
 
 /// One-off pass over images cached at full size. Returns how many post and
 /// feed images were rewritten.
-#[allow(dead_code)] // run once by hand; no request path calls it
 pub async fn optimize_all(pool: &SqlitePool, dir: &Path) -> anyhow::Result<(usize, usize)> {
     let mut posts = 0;
     let paths: Vec<String> = sqlx::query_scalar(
@@ -293,8 +336,123 @@ pub async fn optimize_all(pool: &SqlitePool, dir: &Path) -> anyhow::Result<(usiz
             feeds += 1;
         }
     }
-    tracing::info!(posts, feeds, "optimized local assets");
+    // Covers are derived from post thumbs and not stored in the DB, so cap the
+    // ones already on disk by scanning the folder.
+    let mut covers = 0;
+    if let Ok(mut entries) = fs::read_dir(dir.join("posts")).await {
+        while let Some(entry) = entries.next_entry().await.ok().flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !name.contains("-1200.")
+                || fs::metadata(&path)
+                    .await
+                    .map(|meta| meta.len())
+                    .unwrap_or(0)
+                    <= MAX_ASSET_BYTES
+            {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path).await else {
+                continue;
+            };
+            let Ok(decoded) = image::load_from_memory(&bytes) else {
+                continue;
+            };
+            let Some((data, ext)) = encode_cover(&decoded, 1200) else {
+                continue;
+            };
+            let stem = name.split("-1200.").next().unwrap_or_default();
+            let out = dir.join("posts").join(format!("{stem}-1200.{ext}"));
+            fs::write(&out, &data).await.ok();
+            if out != path {
+                fs::remove_file(&path).await.ok();
+            }
+            covers += 1;
+        }
+    }
+    tracing::info!(posts, feeds, covers, "optimized local assets");
     Ok((posts, feeds))
+}
+
+/// Backs `cargo run -- verify-assets`: every local image the DB references must
+/// exist under the served `static/` tree.
+pub async fn verify_all(pool: &SqlitePool) -> anyhow::Result<()> {
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT thumb_url FROM posts WHERE thumb_url LIKE '/static/assets/%'
+         UNION SELECT avatar_url FROM feeds WHERE avatar_url LIKE '/static/assets/%'
+         UNION SELECT banner_url FROM feeds WHERE banner_url LIKE '/static/assets/%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    let missing: Vec<&str> = paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !Path::new(path.trim_start_matches('/')).exists())
+        .collect();
+    anyhow::ensure!(
+        missing.is_empty(),
+        "{} of {} referenced assets are missing (e.g. {})",
+        missing.len(),
+        paths.len(),
+        missing.first().copied().unwrap_or_default()
+    );
+    tracing::info!(assets = paths.len(), "verified local assets");
+    Ok(())
+}
+
+/// Backs `cargo run -- sync-assets`: uploads every file under `dir` that the
+/// manifest does not already list with the same bytes. Run after
+/// `optimize-images`, which rewrites files in place.
+pub async fn sync_all(dir: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(blob::base().is_some(), "BLOB_READ_WRITE_TOKEN is not set");
+    let client = Client::new();
+    let manifest_path = Path::new("data/blob-manifest.json");
+    let mut manifest: std::collections::BTreeMap<String, String> = fs::read(manifest_path)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let prefix = format!("{}/", dir.to_string_lossy().trim_end_matches('/'));
+    let mut pending = vec![dir.to_path_buf()];
+    let (mut uploaded, mut skipped) = (0usize, 0usize);
+    while let Some(current) = pending.pop() {
+        let Ok(mut entries) = fs::read_dir(&current).await else {
+            continue;
+        };
+        while let Some(entry) = entries.next_entry().await.ok().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let Some(name) = path.to_str().and_then(|full| full.strip_prefix(&prefix)) else {
+                continue;
+            };
+            let Ok(bytes) = fs::read(&path).await else {
+                continue;
+            };
+            let digest: String = Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            if manifest.get(name) == Some(&digest) {
+                skipped += 1;
+                continue;
+            }
+            if blob::put(&client, name, bytes, blob::content_type(name)).await {
+                manifest.insert(name.to_string(), digest);
+                uploaded += 1;
+                if uploaded % 200 == 0 {
+                    tracing::info!(uploaded, skipped, "syncing assets");
+                }
+            }
+        }
+    }
+    fs::write(manifest_path, serde_json::to_vec(&manifest)?).await?;
+    tracing::info!(uploaded, skipped, "synced assets to blob");
+    Ok(())
 }
 
 /// Re-encode one cached file at `width`, writing it under `kind`'s folder.
@@ -313,9 +471,13 @@ async fn optimize_file(dir: &Path, public: &str, kind: &str, width: u32) -> Opti
     if decoded.width() <= width && bytes.len() as u64 <= SMALL_BYTES {
         return None;
     }
-    let (data, out_ext) = encode(&decoded, width)?;
+    let (data, out_ext) = if kind == "banners" {
+        encode_cover(&decoded, width)?
+    } else {
+        encode(&decoded, width)?
+    };
     let cover = if kind == "posts" {
-        Some(encode(&decoded, 1200)?)
+        Some(encode_cover(&decoded, 1200)?)
     } else {
         None
     };

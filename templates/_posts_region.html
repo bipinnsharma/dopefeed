@@ -1,0 +1,12 @@
+<div id="posts">
+<div class="post-list">
+{% for post in posts %}{% include "_post_row.html" %}{% endfor %}
+</div>
+{% if posts.is_empty() %}<div class="empty">{% if q.is_empty() %}No posts yet. The feed has been added and will be fetched shortly.{% else %}No posts match "{{ q }}".{% endif %}</div>{% endif %}
+{% if has_more || page > 1 %}
+<nav class="load-more" aria-label="Post pages">
+  {% if page > 1 %}<a class="button-secondary" href="/f/{{ feed.id }}?page={{ page - 1 }}">Newer</a>{% endif %}
+  {% if has_more %}<a class="button-secondary" href="/f/{{ feed.id }}?page={{ page + 1 }}">Older</a>{% endif %}
+</nav>
+{% endif %}
+</div>

@@ -3,3 +3,7 @@
 /data/dopefeed.db
 /data/dopefeed.db-shm
 /data/dopefeed.db-wal
+/data/dopefeed.db.gz
+/data/topfeed-cache
+/data/blob-manifest.json
+/static/assets

@@ -8,6 +8,18 @@
 <meta property="og:image" content="https://dopefeed.vercel.app/static/og-image.jpg">
 <meta name="twitter:card" content="summary_large_image">
 {% include "_theme_init.html" %}
+<script>
+(function () {
+  document.documentElement.setAttribute("data-bar-search", "");
+  // The shell slide-in is a first-impression only; sidebar links are full
+  // navigations, so mark the tab as seen before the first paint.
+  try {
+    if (sessionStorage.getItem("dopefeed.seen")) return;
+    sessionStorage.setItem("dopefeed.seen", "1");
+  } catch (e) {}
+  document.documentElement.dataset.firstLoad = "";
+})();
+</script>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="preload" href="/static/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/tokens.css">
@@ -15,6 +27,7 @@
 {% block head %}{% endblock %}
 {% block scripts %}{% endblock %}
 <script src="/static/app.js" defer></script>
+{% if cfg!(debug_assertions) %}<script src="/static/dev-annotate.js" defer></script>{% endif %}
 </head>
 <body>
 <div class="app-shell">
@@ -41,11 +54,17 @@
       <a class="mobile-brand" href="/" aria-label="dopefeed home">
         <img src="/static/logo.svg" alt="" width="28" height="28">
       </a>
-      <button type="button" class="menu-toggle" aria-controls="mobile-menu"
-              aria-expanded="false" aria-label="Open menu">
-        <svg class="menu-icon menu-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,1,0,16H40a8,8,0,0,1,0-16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/></svg>
-        <svg class="menu-icon menu-close" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
-      </button>
+      <div class="mobile-bar-actions">
+        <button type="button" class="menu-toggle bar-search-toggle" aria-expanded="false" aria-label="Search">
+          <svg class="menu-icon menu-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></svg>
+          <svg class="menu-icon menu-close" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+        </button>
+        <button type="button" class="menu-toggle" id="menu-toggle" aria-controls="mobile-menu"
+                aria-expanded="false" aria-label="Open menu">
+          <svg class="menu-icon menu-open" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/></svg>
+          <svg class="menu-icon menu-close" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
+        </button>
+      </div>
       <nav class="mobile-nav" id="mobile-menu" aria-label="Main" hidden>
         <a class="mobile-link" href="/">Directory</a>
         <a class="mobile-link" href="/my">My feed</a>
@@ -54,6 +73,7 @@
         <a class="mobile-link" href="/submit">Submit</a>
         <a class="mobile-link" href="/links">Links</a>
         <a class="mobile-link" href="/skills">Skills</a>
+        <div class="mobile-theme">{% include "_theme_toggle.html" %}</div>
       </nav>
     </div>
 
