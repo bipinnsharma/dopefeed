@@ -1,6 +1,6 @@
 /target
-/data
+/data/*
+!/data/dopefeed.db.xz
 .env
-/static/assets
 .vercel
 .env*
