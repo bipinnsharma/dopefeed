@@ -167,7 +167,13 @@ fn public_path(kind: &str, stem: &str, ext: &str) -> String {
 /// Browser URL for a stored asset path. Blob serves it when configured, so the
 /// DB keeps local paths and the same code works with and without a store.
 pub fn url(path: &str) -> String {
-    match (path.strip_prefix("/static/assets/"), blob::base()) {
+    url_with(path, blob::base().as_deref())
+}
+
+/// The mapping without the env lookup, so it is testable without exporting a
+/// token (which would flip the other asset assertions).
+pub fn url_with(path: &str, base: Option<&str>) -> String {
+    match (path.strip_prefix("/static/assets/"), base) {
         (Some(rest), Some(base)) => format!("{base}/{rest}"),
         _ => path.to_string(),
     }

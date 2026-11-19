@@ -1,4 +1,5 @@
 use crate::{
+    assets,
     config::Config,
     models::{Post, PostRow},
     routes,
@@ -1538,5 +1539,27 @@ async fn body_image_fills_a_missing_thumb() {
             .as_deref()
             .is_some_and(|value| value.starts_with("/static/assets/posts/")),
         "{stored:?}"
+    );
+}
+
+/// Blob hosts cached assets only; placeholders and hotlinked images stay put.
+#[test]
+fn asset_url_maps_only_cached_assets() {
+    let base = Some("https://store.public.blob.vercel-storage.com");
+    assert_eq!(
+        assets::url_with("/static/assets/posts/abc.jpg", base),
+        "https://store.public.blob.vercel-storage.com/posts/abc.jpg"
+    );
+    assert_eq!(
+        assets::url_with("/static/assets/posts/abc.jpg", None),
+        "/static/assets/posts/abc.jpg"
+    );
+    assert_eq!(
+        assets::url_with("/static/no-image-dl.jpg", base),
+        "/static/no-image-dl.jpg"
+    );
+    assert_eq!(
+        assets::url_with("https://i.ytimg.com/vi/x/hq.jpg", base),
+        "https://i.ytimg.com/vi/x/hq.jpg"
     );
 }
