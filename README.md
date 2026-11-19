@@ -114,6 +114,19 @@ sync, image optimization and asset verification, snapshots the DB with
 commits and pushes. Vercel builds that push, so no deploy happens unless there is
 something new to publish.
 
+To publish twice a day, install the launchd job (`scripts/com.dopefeed.snapshot.plist`
+runs it at 07:00 and 21:00). Replace `__REPO__` and `__HOME__` with absolute paths
+first, then load it:
+
+```sh
+sed "s#__REPO__#$PWD#g; s#__HOME__#$HOME#g" scripts/com.dopefeed.snapshot.plist \
+    > ~/Library/LaunchAgents/com.dopefeed.snapshot.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dopefeed.snapshot.plist
+```
+
+macOS will not let launchd read a checkout under `~/Documents`; keep the repo
+somewhere like `~/dopefeed`. Output goes to `~/Library/Logs/dopefeed-snapshot.log`.
+
 ## Docker
 
 ```sh
