@@ -110,8 +110,9 @@ nearly free. It is a dry run
 unless `--apply` is passed. The next RSS
 refresh fills a stub's body and poster. `scripts/snapshot.sh` runs refresh, the
 sync, image optimization and asset verification, snapshots the DB with
-`.backup`, rebuilds `data/dopefeed.db.xz`, then commits and pushes. Vercel builds
-that push, so no deploy happens unless there is something new to publish.
+`.backup`, uploads `data/dopefeed.db.xz` to the `db-latest` GitHub release, then
+commits and pushes. Vercel builds that push, so no deploy happens unless there is
+something new to publish.
 
 ## Docker
 
@@ -125,8 +126,10 @@ The image runs as a non-root user and stores SQLite in `/app/data`.
 ### Vercel
 
 `Dockerfile.vercel` runs the same binary on Vercel's Container Runtime. It seeds
-`/tmp/dopefeed.db` from the compressed `data/dopefeed.db.xz` snapshot because the
-container filesystem is read-only elsewhere.
+`/tmp/dopefeed.db` from `data/dopefeed.db.xz` because the container filesystem is
+read-only elsewhere. The build downloads that snapshot from the `db-latest`
+GitHub release; `data/snapshot.txt` holds its URL, and changing it busts the
+Docker layer cache so a new snapshot is picked up.
 
 ```sh
 vercel link --project dopefeed
@@ -136,9 +139,11 @@ Set `BASE_URL=https://dopefeed.vercel.app` and `PORT=3000` in the project settin
 `WORKER=0` disables the in-process worker there so scale-from-zero never starts a
 fetch storm; the data comes from the snapshot. The project is linked to
 `github.com/bipinnsharma/dopefeed` and builds every push to `master`, so
-`static/assets/` and `data/dopefeed.db.xz` are tracked in git (233 MB and 12 MB)
-rather than uploaded through the deploy API. `scripts/snapshot.sh` is the way to
-publish: it commits and pushes. `scripts/smoke.sh` checks a deployment afterwards.
+`static/assets/` is tracked in git (233 MB) rather than uploaded through the
+deploy API, while the DB snapshot stays out of history as a release asset.
+`scripts/snapshot.sh` is the way to publish: it uploads the snapshot, commits and
+pushes. It needs `GITHUB_TOKEN` (repo scope) or a stored GitHub credential.
+`scripts/smoke.sh` checks a deployment afterwards.
 Images are already resized (post thumbs 320px, avatars 96px, covers 1200px) by
 `optimize-images`. The SQLite file and anything the worker caches are per-instance
 and lost when the function scales to zero; submissions are not persistent on Vercel.
