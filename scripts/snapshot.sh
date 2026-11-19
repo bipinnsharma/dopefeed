@@ -1,9 +1,22 @@
 #!/bin/sh
 # Publish a fresh snapshot: refresh content, re-encode new images, then push
 # the DB and assets. Vercel builds each push from GitHub, so nothing goes
-# through the deploy file-upload API. Run weekly or on demand.
+# through the deploy file-upload API. launchd runs it at 07:00 and 21:00.
 set -eu
 cd "$(dirname "$0")/.."
+
+# launchd runs this twice a day; never let two publishes overlap.
+lock="${TMPDIR:-/tmp}/dopefeed-snapshot.lock"
+if ! mkdir "$lock" 2>/dev/null; then
+    if kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then
+        echo "snapshot already running; exiting" >&2
+        exit 0
+    fi
+    rm -rf "$lock"
+    mkdir "$lock"
+fi
+echo $$ > "$lock/pid"
+trap 'rm -rf "$lock"' EXIT
 
 cargo run --release -- refresh
 python3 scripts/topfeed_sync.py --apply
