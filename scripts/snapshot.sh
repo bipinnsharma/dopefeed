@@ -1,6 +1,7 @@
 #!/bin/sh
-# Local only: the DB snapshot and static/assets are gitignored, so Vercel must
-# be deployed from this working copy. Run weekly or on demand.
+# Publish a fresh snapshot: refresh content, re-encode new images, then push
+# the DB and assets. Vercel builds each push from GitHub, so nothing goes
+# through the deploy file-upload API. Run weekly or on demand.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -15,6 +16,10 @@ sqlite3 data/dopefeed.db ".backup data/dopefeed.snapshot.db"
 xz -9 -f data/dopefeed.snapshot.db
 mv -f data/dopefeed.snapshot.db.xz data/dopefeed.db.xz
 
-# A stale CLI token is the usual cause of a deploy dying at 0.0B.
-vercel whoami
-vercel deploy --prod --yes
+git add -A
+if git diff --cached --quiet; then
+    echo "nothing changed; no deploy"
+    exit 0
+fi
+git commit -m "Snapshot $(date +%Y-%m-%d)"
+git push origin "$(git branch --show-current)"
