@@ -109,8 +109,9 @@ replacing it, so a refresh cannot drop the body. API responses are cached in
 nearly free. It is a dry run
 unless `--apply` is passed. The next RSS
 refresh fills a stub's body and poster. `scripts/snapshot.sh` runs refresh, the
-sync, image optimization and asset verification, checkpoints the WAL, rebuilds
-`data/dopefeed.db.xz`, and deploys.
+sync, image optimization and asset verification, snapshots the DB with
+`.backup`, rebuilds `data/dopefeed.db.xz`, then commits and pushes. Vercel builds
+that push, so no deploy happens unless there is something new to publish.
 
 ## Docker
 
@@ -129,13 +130,15 @@ container filesystem is read-only elsewhere.
 
 ```sh
 vercel link --project dopefeed
-vercel deploy --prod
 ```
 
 Set `BASE_URL=https://dopefeed.vercel.app` and `PORT=3000` in the project settings.
 `WORKER=0` disables the in-process worker there so scale-from-zero never starts a
-fetch storm; the data comes from the snapshot. Deploy with `vercel deploy --prod`
-from the working directory so the gitignored `static/assets/` is included. Images
-are already resized (post thumbs 320px, avatars 96px, covers 1200px) by
+fetch storm; the data comes from the snapshot. The project is linked to
+`github.com/bipinnsharma/dopefeed` and builds every push to `master`, so
+`static/assets/` and `data/dopefeed.db.xz` are tracked in git (233 MB and 12 MB)
+rather than uploaded through the deploy API. `scripts/snapshot.sh` is the way to
+publish: it commits and pushes. `scripts/smoke.sh` checks a deployment afterwards.
+Images are already resized (post thumbs 320px, avatars 96px, covers 1200px) by
 `optimize-images`. The SQLite file and anything the worker caches are per-instance
 and lost when the function scales to zero; submissions are not persistent on Vercel.
