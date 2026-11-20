@@ -16,6 +16,10 @@
   {% if let Some(description) = feed.description %}<p class="feed-card-desc">{{ description }}</p>{% endif %}
   <p class="feed-card-meta">
     {% if feed.is_new() %}<span class="new-pill">new</span>{% endif %}
-    <span class="feed-card-count">{% if feed.post_count == 1 %}1 post{% else %}{{ feed.post_count }} posts{% endif %}</span>
+    <span class="feed-card-count">{{ feed.formatted_post_count() }}</span>
+    {% if let Some(age) = feed.latest_age_label() %}
+    <span class="feed-card-meta-separator" aria-hidden="true">•</span>
+    <time class="feed-card-age" datetime="{{ feed.latest_published_at.as_deref().unwrap_or_default() }}">{{ age }}</time>
+    {% endif %}
   </p>
 </article>

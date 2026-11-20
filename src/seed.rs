@@ -441,7 +441,7 @@ const SEED: &[(&str, &str, &str)] = &[
     (
         "Charlie Deets",
         "design",
-        "discover:https://charliedeets.com",
+        "discover:https://charliedeets.com/writing/",
     ),
     ("Benja.dev", "coding", "discover:https://benja.dev/writing"),
     ("Reid Hoffman", "ceo", "https://www.reidhoffman.org/feed/"),

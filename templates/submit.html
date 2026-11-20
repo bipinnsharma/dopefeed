@@ -3,8 +3,11 @@
 {% block content %}
 <header class="page-head">
   <h1 class="page-title">Submit a feed</h1>
+  {% if read_only %}<p class="page-sub">Submissions are unavailable on this read-only instance.</p>{% else %}
   <p class="page-sub">Paste an RSS or Atom feed, a site with a feed, or a YouTube channel. It is validated and added immediately.</p>
+  {% endif %}
 </header>
+{% if !read_only %}
 {% if let Some(error) = error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 <form class="submit-form" method="post" action="/submit">
   <label class="field">
@@ -24,4 +27,5 @@
   <button type="submit" class="button">Submit feed</button>
   <p class="meta">Five submissions per hour per address. Duplicates are rejected.</p>
 </form>
+{% endif %}
 {% endblock %}

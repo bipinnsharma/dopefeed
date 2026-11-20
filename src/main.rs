@@ -37,10 +37,21 @@ async fn main() -> anyhow::Result<()> {
         let state = AppState::new(pool, config)?;
         match command {
             "refresh" => worker::refresh_all(&state).await?,
+            "refresh-feed" => {
+                let feed_id = std::env::args()
+                    .nth(2)
+                    .ok_or_else(|| anyhow::anyhow!("usage: dopefeed refresh-feed <feed-id>"))?
+                    .parse::<i64>()?;
+                worker::refresh_feed(&state, feed_id).await?;
+            }
             "optimize-images" => {
                 assets::optimize_all(&state.pool, std::path::Path::new(assets::DIR)).await?;
             }
             "verify-assets" => assets::verify_all(&state.pool).await?,
+            "repair-body-urls" => {
+                let changed = worker::fetch::repair_body_urls(&state.pool).await?;
+                println!("repaired {changed} post bodies");
+            }
             "sync-assets" => assets::sync_all(std::path::Path::new(assets::DIR)).await?,
             other => anyhow::bail!("unknown command {other:?}"),
         }

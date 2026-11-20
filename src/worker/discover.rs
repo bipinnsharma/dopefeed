@@ -53,6 +53,15 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
     }
 
     if let Ok(html) = std::str::from_utf8(&fetched.body) {
+        if let Some(feed) = charlie_writing_feed(html, &fetched.final_url) {
+            return Ok(build(
+                fetched.final_url.clone(),
+                feed,
+                fetched.headers,
+                input,
+                true,
+            ));
+        }
         for candidate in alternates(html, &fetched.final_url) {
             let Ok(next) = ssrf::get(client, &candidate, &HeaderMap::new()).await else {
                 continue;
@@ -82,6 +91,86 @@ pub async fn resolve(client: &Client, input: &Url) -> Result<Resolved, String> {
     }
 
     Err("Could not find a feed at that URL. Try the feed link or a YouTube channel.".into())
+}
+
+fn charlie_writing_feed(html: &str, base: &Url) -> Option<feed_rs::model::Feed> {
+    if base.host_str()? != "charliedeets.com" || base.path() != "/writing/" {
+        return None;
+    }
+
+    let mut flight = String::new();
+    let mut remaining = html;
+    const MARKER: &str = "self.__next_f.push([1,";
+    while let Some(marker) = remaining.find(MARKER) {
+        remaining = &remaining[marker + MARKER.len()..];
+        let start = remaining.find('"')?;
+        let bytes = remaining.as_bytes();
+        let mut escaped = false;
+        let mut end = None;
+        for (index, byte) in bytes.iter().enumerate().skip(start + 1) {
+            if *byte == b'"' && !escaped {
+                end = Some(index);
+                break;
+            }
+            escaped = *byte == b'\\' && !escaped;
+        }
+        let end = end?;
+        if let Ok(payload) = serde_json::from_str::<String>(&remaining[start..=end]) {
+            flight.push_str(&payload);
+        }
+        remaining = &remaining[end + 1..];
+    }
+
+    let mut links = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut offset = 0;
+    while let Some(found) = flight[offset..].find("{\"slug\":") {
+        let start = offset + found;
+        let mut stream =
+            serde_json::Deserializer::from_str(&flight[start..]).into_iter::<serde_json::Value>();
+        let value = stream.next()?.ok()?;
+        offset = start + stream.byte_offset();
+
+        let Some(frontmatter) = value.get("frontmatter") else {
+            continue;
+        };
+        if frontmatter
+            .get("hidden")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+        {
+            continue;
+        }
+        let Some(slug) = value.get("slug").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if slug.is_empty()
+            || !slug
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        {
+            continue;
+        }
+        let Some(title) = frontmatter.get("title").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if title.trim().is_empty() || title.chars().count() > 160 {
+            continue;
+        }
+        let Some(date) = frontmatter
+            .get("date")
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_stamp)
+        else {
+            continue;
+        };
+        let url = base.join(&format!("/posts/{slug}")).ok()?;
+        if url.host_str() != base.host_str() || !seen.insert(url.as_str().to_string()) {
+            continue;
+        }
+        links.push((url.to_string(), title.to_string(), Some(date)));
+    }
+    synthetic_feed("Charlie Deets | Writing", base, links)
 }
 
 /// Many personal sites list their posts in HTML but publish no RSS. Build a
@@ -1127,6 +1216,54 @@ mod tests {
             .collect();
         dates.sort();
         assert_eq!(dates, ["2026-10-02", "2026-11-10", "2026-11-17"]);
+    }
+
+    #[test]
+    fn charlie_writing_feed_reads_next_payload_and_keeps_2026_entries() {
+        let base = Url::parse("https://charliedeets.com/writing/").unwrap();
+        let payload = r#"4:{"all":[{"year":"2026","posts":[{"slug":"2026-09-01-speed","frontmatter":{"title":"Speed","date":"2026-09-01","hidden":false}},{"slug":"2026-07-08-cameras","frontmatter":{"title":"Cameras","date":"2026-07-08","hidden":false}},{"slug":"hidden-post","frontmatter":{"title":"Hidden","date":"2026-01-01","hidden":true}}]}],"design":[{"slug":"2026-09-01-speed","frontmatter":{"title":"Speed","date":"2026-09-01","hidden":false}}]}"#;
+        let html = format!(
+            "<script>self.__next_f.push([1,{}])</script>",
+            serde_json::to_string(payload).unwrap()
+        );
+
+        let feed = super::charlie_writing_feed(&html, &base).unwrap();
+        assert_eq!(
+            feed.entries.len(),
+            2,
+            "category copies and hidden posts are excluded"
+        );
+        let mut entries: Vec<_> = feed
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.title.as_ref().unwrap().content.as_str(),
+                    entry.links[0].href.as_str(),
+                    entry.published.unwrap().format("%Y-%m-%d").to_string(),
+                )
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.1);
+        assert_eq!(
+            entries,
+            [
+                (
+                    "Cameras",
+                    "https://charliedeets.com/posts/2026-07-08-cameras",
+                    "2026-07-08".into()
+                ),
+                (
+                    "Speed",
+                    "https://charliedeets.com/posts/2026-09-01-speed",
+                    "2026-09-01".into()
+                ),
+            ]
+        );
+        assert!(
+            super::charlie_writing_feed(&html, &Url::parse("https://charliedeets.com/").unwrap())
+                .is_none()
+        );
     }
 
     #[test]

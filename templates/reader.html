@@ -27,7 +27,7 @@
   {% if let Some(cover) = cover %}
   <figure class="reader-cover">
     <img src="{{ cover }}" alt="" decoding="async" fetchpriority="high" loading="eager"
-         onerror="this.onerror=null;this.src='{{ post.thumb_or_placeholder() }}'">
+         data-fallback="{{ post.thumb_or_placeholder() }}" onerror="this.onerror=null;this.src=this.dataset.fallback">
   </figure>
   {% else %}
   {% if !post.is_stub() %}

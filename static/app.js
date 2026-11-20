@@ -3,6 +3,7 @@
   var SUBS = "dopefeed.subs";
   var READ = "dopefeed.read";
   var CAP = 5000;
+  var MAX_SUBS = 50;
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function load(key) {
@@ -201,31 +202,40 @@
   var subs = load(SUBS).map(Number).filter(Number.isInteger);
   var read = load(READ).map(Number).filter(Number.isInteger);
 
-  document.querySelectorAll("button[data-feed-id]").forEach(function (button) {
-    var id = Number(button.dataset.feedId);
-    function paint() {
-      var on = subs.indexOf(id) !== -1;
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-    }
-    paint();
-    button.addEventListener("click", function () {
-      var wasOn = subs.indexOf(id) !== -1;
-      subs = wasOn
-        ? subs.filter(function (value) { return value !== id; })
-        : subs.concat(id);
-      save(SUBS, subs);
-      paint();
-      if (!wasOn) {
-        showToast((button.dataset.feedTitle || "Feed") + " is added to your feed.");
-      }
+  function paintState() {
+    subs = load(SUBS).map(Number).filter(Number.isInteger);
+    read = load(READ).map(Number).filter(Number.isInteger);
+    document.querySelectorAll("button[data-feed-id]").forEach(function (button) {
+      button.setAttribute("aria-pressed", subs.indexOf(Number(button.dataset.feedId)) !== -1 ? "true" : "false");
     });
-  });
+    var readSet = new Set(read);
+    document.querySelectorAll(".post-row[data-post-id]").forEach(function (row) {
+      row.classList.toggle("is-read", readSet.has(Number(row.dataset.postId)));
+    });
+  }
 
-  var readSet = new Set(read);
-  document.querySelectorAll(".post-row[data-post-id]").forEach(function (row) {
-    if (readSet.has(Number(row.dataset.postId))) {
-      row.classList.add("is-read");
+  paintState();
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest("button[data-feed-id]");
+    if (!button) return;
+    var id = Number(button.dataset.feedId);
+    subs = load(SUBS).map(Number).filter(Number.isInteger);
+    var wasOn = subs.indexOf(id) !== -1;
+    if (!wasOn && subs.length >= MAX_SUBS) {
+      showToast("You can subscribe to up to 50 feeds. Unsubscribe from one first.");
+      return;
     }
+    subs = wasOn
+      ? subs.filter(function (value) { return value !== id; })
+      : subs.concat(id);
+    save(SUBS, subs);
+    paintState();
+    if (!wasOn) showToast((button.dataset.feedTitle || "Feed") + " is added to your feed.");
+  });
+  document.addEventListener("htmx:afterSwap", paintState);
+  window.addEventListener("pageshow", paintState);
+  window.addEventListener("storage", function (event) {
+    if (event.key === SUBS || event.key === READ) paintState();
   });
 
   var article = document.querySelector("article.reader[data-post-id]");
@@ -258,8 +268,19 @@
   });
 
   document.querySelectorAll(".chips").forEach(function (group) {
+    var filters = document.getElementById("filters");
+    var sortForm = document.querySelector(".sort-form");
+    var query = filters && filters.querySelector('[name="q"]');
+    if (query && sortForm) {
+      query.addEventListener("input", function () {
+        sortForm.querySelector('[name="q"]').value = query.value;
+      });
+    }
     group.querySelectorAll(".chip").forEach(function (chip) {
       chip.addEventListener("click", function () {
+        var category = new URL(chip.href, location.href).searchParams.get("category") || "";
+        if (filters) filters.querySelector('[name="category"]').value = category;
+        if (sortForm) sortForm.querySelector('[name="category"]').value = category;
         group.querySelectorAll(".chip").forEach(function (other) {
           other.classList.remove("is-active");
           other.removeAttribute("aria-current");
@@ -451,7 +472,18 @@
 
   var timeline = document.getElementById("timeline");
   if (timeline) {
-    if (subs.length === 0) {
+    if (subs.length > MAX_SUBS) {
+      var warning = document.createElement("div");
+      warning.className = "empty";
+      warning.appendChild(document.createTextNode("You have " + subs.length + " saved subscriptions; the timeline supports up to 50. None were removed. "));
+      var browse = document.createElement("a");
+      browse.className = "text-link";
+      browse.href = "/";
+      browse.textContent = "Browse the directory";
+      warning.appendChild(browse);
+      warning.appendChild(document.createTextNode(" and unsubscribe from feeds, then reload."));
+      timeline.replaceChildren(warning);
+    } else if (subs.length === 0) {
       timeline.innerHTML =
         '<div class="empty">Subscribe to feeds to build your timeline. ' +
         '<a class="text-link" href="/">Browse the directory \u2192</a></div>';

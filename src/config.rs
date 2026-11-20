@@ -8,16 +8,15 @@ pub struct Config {
     pub base_url: Url,
     pub database_url: String,
     pub fetch_concurrency: usize,
-    /// Six alphanumeric characters (letters + digits) guarding `/admin`.
+    /// Reject all mutations when the instance cannot persist them durably.
+    pub read_only: bool,
+    /// At least 12 printable ASCII characters guarding `/admin`.
     /// `None` disables the admin routes.
     pub admin_key: Option<String>,
 }
 
 pub fn valid_admin_key(key: &str) -> bool {
-    key.len() == 6
-        && key.chars().all(|c| c.is_ascii_alphanumeric())
-        && key.chars().any(|c| c.is_ascii_digit())
-        && key.chars().any(|c| c.is_ascii_alphabetic())
+    key.len() >= 12 && key.bytes().all(|byte| (b' '..=b'~').contains(&byte))
 }
 
 impl Config {
@@ -43,13 +42,19 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8)
             .max(1);
+        let read_only = std::env::var("READ_ONLY")
+            .ok()
+            .map(|value| value.parse::<bool>())
+            .transpose()
+            .context("READ_ONLY must be true or false")?
+            .unwrap_or(false);
         let admin_key = std::env::var("ADMIN_KEY")
             .ok()
             .filter(|v| !v.trim().is_empty());
         if let Some(key) = &admin_key {
             anyhow::ensure!(
                 valid_admin_key(key),
-                "ADMIN_KEY must be 6 letters/numbers with at least one of each"
+                "ADMIN_KEY must contain at least 12 printable ASCII characters"
             );
         }
         Ok(Self {
@@ -57,6 +62,7 @@ impl Config {
             base_url,
             database_url,
             fetch_concurrency,
+            read_only,
             admin_key,
         })
     }

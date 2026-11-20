@@ -18,7 +18,10 @@ fn token() -> Option<&'static str> {
 /// `vercel_blob_rw_<store>_<secret>` carries the store id, which is also the
 /// public read host.
 pub fn base() -> Option<String> {
-    let store = token()?.strip_prefix("vercel_blob_rw_")?.split('_').next()?;
+    let store = token()?
+        .strip_prefix("vercel_blob_rw_")?
+        .split('_')
+        .next()?;
     Some(format!(
         "https://{}.public.blob.vercel-storage.com",
         store.to_ascii_lowercase()
@@ -54,7 +57,13 @@ pub async fn put(client: &Client, pathname: &str, body: Vec<u8>, content_type: &
 }
 
 pub fn content_type(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or_default().to_ascii_lowercase().as_str() {
+    match path
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "png" => "image/png",
         "webp" => "image/webp",
         "gif" => "image/gif",

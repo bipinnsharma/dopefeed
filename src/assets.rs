@@ -64,13 +64,25 @@ pub async fn cache_in(dir: &Path, client: &Client, url: &str, kind: &str) -> Opt
             .await
             .ok()?;
         let content_type = blob::content_type(&name);
-        blob::put(client, &format!("{kind}/{name}"), fetched.body, content_type).await;
+        blob::put(
+            client,
+            &format!("{kind}/{name}"),
+            fetched.body,
+            content_type,
+        )
+        .await;
         return Some(public_path(kind, &stem, ext));
     };
     let (data, out_ext) = encode(&image, width)?;
     let name = format!("{stem}.{out_ext}");
     fs::write(dir.join(kind).join(&name), &data).await.ok()?;
-    blob::put(client, &format!("{kind}/{name}"), data, blob::content_type(&name)).await;
+    blob::put(
+        client,
+        &format!("{kind}/{name}"),
+        data,
+        blob::content_type(&name),
+    )
+    .await;
     if kind == "posts" {
         let (cover, cover_ext) = encode_cover(&image, 1200)?;
         let cover_name = format!("{stem}-1200.{cover_ext}");

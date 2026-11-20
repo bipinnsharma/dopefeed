@@ -285,7 +285,10 @@ img { max-width: 100%; }
   transition: background var(--duration-base) var(--ease-standard),
               color var(--duration-base) var(--ease-standard);
 }
-.chip:hover { background: var(--color-fill-hover); color: var(--color-ink); }
+.chip:not(.is-active):hover {
+  background: var(--color-fill-hover);
+  color: var(--color-accent-strong);
+}
 .chip.is-active {
   background: var(--color-ink);
   color: var(--color-ink-inverse);
@@ -419,6 +422,8 @@ img { max-width: 100%; }
   line-height: var(--leading-base);
   color: var(--color-ink-secondary);
 }
+.feed-card-meta-separator { color: var(--color-ink-tertiary); }
+.feed-card-age { white-space: nowrap; }
 .new-pill {
   display: inline-block;
   margin-left: var(--space-4);
@@ -1159,7 +1164,7 @@ img { max-width: 100%; }
     min-height: 0;
     margin: var(--space-8);
     padding: var(--space-16) var(--space-24) var(--space-24);
-    background: var(--color-surface-solid);
+    background: var(--surface-base);
     border: 1px solid var(--color-border);
     border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
     border-radius: var(--radius-12);

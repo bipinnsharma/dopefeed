@@ -13,6 +13,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use url::Url;
 
 const MAX_ENTRIES: usize = 1000;
+const BODY_URL_VERSION: &str = "resolved-body-urls-v1";
+const BODY_REPAIR_BATCH: i64 = 500;
 
 /// Feeds are allowed to link with site-relative paths (pj-onori.blog does).
 fn absolute(href: &str, base: &str) -> String {
@@ -23,6 +25,48 @@ fn absolute(href: &str, base: &str) -> String {
             .map(|url| url.to_string())
             .unwrap_or_else(|_| href.to_string()),
     }
+}
+
+fn clean_body(raw: &str, article_url: &str) -> String {
+    match Url::parse(article_url) {
+        Ok(base) => ammonia::Builder::new()
+            .url_relative(ammonia::UrlRelative::RewriteWithBase(base))
+            .clean(raw)
+            .to_string(),
+        Err(_) => ammonia::clean(raw),
+    }
+}
+
+/// Rewrites already-stored bodies, including posts no longer returned by feeds.
+pub async fn repair_body_urls(pool: &SqlitePool) -> anyhow::Result<usize> {
+    let mut after_id = 0;
+    let mut changed = 0;
+    loop {
+        let rows: Vec<(i64, String, String)> = sqlx::query_as(
+            "SELECT id, url, content_html FROM posts
+             WHERE id > ? AND content_html <> '' ORDER BY id LIMIT ?",
+        )
+        .bind(after_id)
+        .bind(BODY_REPAIR_BATCH)
+        .fetch_all(pool)
+        .await?;
+        let Some((last_id, _, _)) = rows.last() else {
+            break;
+        };
+        after_id = *last_id;
+        for (id, url, old_html) in rows {
+            let new_html = clean_body(&old_html, &url);
+            if new_html != old_html {
+                sqlx::query("UPDATE posts SET content_html = ? WHERE id = ?")
+                    .bind(new_html)
+                    .bind(id)
+                    .execute(pool)
+                    .await?;
+                changed += 1;
+            }
+        }
+    }
+    Ok(changed)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -440,7 +484,7 @@ pub async fn ingest(
         // Decoded lazily: body images sit below the fold and the reader
         // should not fetch them all at once.
         let content_html =
-            ammonia::clean(&raw).replace("<img ", "<img loading=\"lazy\" decoding=\"async\" ");
+            clean_body(&raw, &url).replace("<img ", "<img loading=\"lazy\" decoding=\"async\" ");
         let summary_source = entry
             .summary
             .as_ref()
@@ -478,6 +522,8 @@ pub async fn ingest(
             .bind(&stored_guid)
             .execute(pool)
             .await?;
+            existing.insert(stored_guid.clone(), Some(entry_hash.clone()));
+            by_url.insert(url.clone(), stored_guid);
         } else {
             sqlx::query(
                 "INSERT INTO posts (feed_id, guid, url, title, author, content_html, summary,
@@ -495,6 +541,7 @@ pub async fn ingest(
             .bind(&entry_hash)
             .execute(pool)
             .await?;
+            existing.insert(guid.clone(), Some(entry_hash));
             by_url.insert(url, guid);
             new_posts += 1;
         }
@@ -511,7 +558,14 @@ fn hash(title: &str, link: &str) -> String {
 /// can skip sanitizing and extracting its body.
 fn content_hash(url: &str, title: &str, raw: &str, published: Option<&str>) -> String {
     let mut hasher = Sha256::new();
-    for part in [url, title, raw, published.unwrap_or_default()] {
+    // Version the inputs so content-hash skips cannot leave old bodies unresolved.
+    for part in [
+        BODY_URL_VERSION,
+        url,
+        title,
+        raw,
+        published.unwrap_or_default(),
+    ] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }

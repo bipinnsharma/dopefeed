@@ -41,12 +41,252 @@ async fn test_pool() -> SqlitePool {
     pool
 }
 
+#[tokio::test]
+async fn id_migration_preserves_rows_and_prevents_reuse_with_foreign_keys() {
+    let options = SqliteConnectOptions::from_str("sqlite::memory:")
+        .unwrap()
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let all = sqlx::migrate!("./migrations");
+    let before_id_migration = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all.iter()
+                .filter(|migration| migration.version < 7)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    before_id_migration.run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO feeds (id, url, site_url, domain, title, category) VALUES
+         (40, 'https://keep.test/feed', 'https://keep.test', 'keep.test', 'Keep', 'tech'),
+         (99, 'https://remove.test/feed', 'https://remove.test', 'remove.test', 'Remove', 'tech')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE feeds SET avatar_url = '/avatar.jpg', banner_url = '/banner.jpg', images_fetched_at = '2025-01-01', favicon_fetched_at = '2025-01-02' WHERE id = 40")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO posts (id, feed_id, guid, url, title, author, content_html, summary, published_at, thumb_url, content_hash) VALUES
+         (400, 40, 'keep', 'https://keep.test/post', 'Keep post', 'Author', '<p>body</p>', 'summary', '2025-01-01', '/thumb.jpg', 'hash'),
+         (999, 99, 'remove', 'https://remove.test/post', 'Remove post', NULL, '<p>body</p>', 'summary', '2025-01-01', NULL, NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO posts (id, feed_id, guid, url, title, content_html, published_at) VALUES (1000, 22, 'orphan', 'https://www.youtube.com/watch?v=abc', 'Archived video', '<p>preserve me</p>', '2025-01-02')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    all.run(&pool).await.unwrap();
+    type RetainedRow = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let retained: RetainedRow = sqlx::query_as(
+        "SELECT f.title, f.avatar_url, f.banner_url, f.images_fetched_at, f.favicon_fetched_at,
+                p.content_html, p.author, p.thumb_url, p.content_hash
+         FROM feeds f JOIN posts p ON p.feed_id = f.id WHERE p.id = 400",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        retained,
+        (
+            "Keep".into(),
+            Some("/avatar.jpg".into()),
+            Some("/banner.jpg".into()),
+            Some("2025-01-01".into()),
+            Some("2025-01-02".into()),
+            "<p>body</p>".into(),
+            Some("Author".into()),
+            Some("/thumb.jpg".into()),
+            Some("hash".into()),
+        )
+    );
+    let archived: (String, String, String, i64) = sqlx::query_as(
+        "SELECT f.title, f.status, p.content_html, p.feed_id
+         FROM feeds f JOIN posts p ON p.feed_id = f.id
+         WHERE f.id = 22 AND p.id = 1000",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        archived,
+        (
+            "Archived feed 22".into(),
+            "rejected".into(),
+            "<p>preserve me</p>".into(),
+            22,
+        )
+    );
+    let indexes: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'index'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for name in [
+        "idx_posts_feed_pub",
+        "idx_posts_pub",
+        "idx_feeds_next",
+        "idx_feeds_cat",
+    ] {
+        assert!(
+            indexes.iter().any(|index| index == name),
+            "missing index {name}"
+        );
+    }
+    assert!(sqlx::query("INSERT INTO posts (feed_id, guid, url, title, content_html, published_at) VALUES (40, 'keep', 'u', 't', '', '2025-01-01')")
+        .execute(&pool).await.is_err(), "unique(feed_id, guid) must survive");
+
+    sqlx::query("DELETE FROM feeds WHERE id = 99")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let cascaded: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE id = 999")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cascaded, 0);
+    let new_feed = sqlx::query("INSERT INTO feeds (url, site_url, domain, title, category) VALUES ('https://new.test/feed', 'https://new.test', 'new.test', 'New', 'tech')")
+        .execute(&pool).await.unwrap().last_insert_rowid();
+    assert!(new_feed > 99);
+    let new_post = sqlx::query("INSERT INTO posts (feed_id, guid, url, title, content_html, published_at) VALUES (?, 'new', 'u', 't', '', '2025-01-01')")
+        .bind(new_feed).execute(&pool).await.unwrap().last_insert_rowid();
+    assert!(new_post > 999);
+
+    sqlx::query("DELETE FROM feeds WHERE id = 40")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let cascade_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE feed_id = 40")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cascade_count, 0);
+    let fk_errors = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert!(fk_errors.is_empty());
+}
+
+#[tokio::test]
+async fn charlie_deets_migration_keeps_only_archive_posts_and_preserves_feed_id() {
+    let options = SqliteConnectOptions::from_str("sqlite::memory:")
+        .unwrap()
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let all = sqlx::migrate!("./migrations");
+    let before_targeted_migration = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all.iter()
+                .filter(|migration| migration.version < 8)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    before_targeted_migration.run(&pool).await.unwrap();
+    sqlx::query("INSERT INTO feeds (id, url, site_url, domain, title, category, etag, last_modified) VALUES (234, 'https://charliedeets.com/', 'https://charliedeets.com/', 'charliedeets.com', 'Charlie Deets', 'design', 'old-etag', 'old-modified')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (guid, url) in [
+        (
+            "writing-a",
+            "https://charliedeets.com/posts/2026-09-01-essay-a",
+        ),
+        (
+            "writing-b",
+            "https://charliedeets.com/posts/2026-07-08-essay-b",
+        ),
+        (
+            "writing-c",
+            "https://charliedeets.com/posts/2026-04-23-essay-c/",
+        ),
+        ("work", "https://charliedeets.com/work/apple"),
+        ("legacy", "https://charliedeets.com/writings/legacy"),
+    ] {
+        sqlx::query("INSERT INTO posts (feed_id, guid, url, title, content_html, published_at) VALUES (234, ?, ?, ?, '<p>body</p>', '2025-01-01')")
+            .bind(guid)
+            .bind(url)
+            .bind(guid)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    all.run(&pool).await.unwrap();
+
+    let feed: (i64, String, String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT id, url, site_url, etag, last_modified FROM feeds WHERE title = 'Charlie Deets'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        feed,
+        (
+            234,
+            "https://charliedeets.com/writing/".into(),
+            "https://charliedeets.com/".into(),
+            None,
+            None,
+        )
+    );
+    let urls: Vec<String> =
+        sqlx::query_scalar("SELECT url FROM posts WHERE feed_id = 234 ORDER BY url")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        urls,
+        vec![
+            "https://charliedeets.com/posts/2026-04-23-essay-c",
+            "https://charliedeets.com/posts/2026-07-08-essay-b",
+            "https://charliedeets.com/posts/2026-09-01-essay-a",
+        ]
+    );
+}
+
 fn test_config(base_url: &str) -> Config {
     Config {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         base_url: base_url.parse().unwrap(),
         database_url: "sqlite::memory:".into(),
         fetch_concurrency: 2,
+        read_only: false,
         admin_key: None,
     }
 }
@@ -61,12 +301,17 @@ async fn spawn_app() -> (String, AppState) {
 }
 
 async fn spawn_app_with_key(key: Option<&str>) -> (String, AppState) {
+    spawn_app_with_mode(key, false).await
+}
+
+async fn spawn_app_with_mode(key: Option<&str>, read_only: bool) -> (String, AppState) {
     let pool = test_pool().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let base = format!("http://{addr}");
     let mut config = test_config(&base);
     config.admin_key = key.map(str::to_string);
+    config.read_only = read_only;
     let state = AppState::new(pool, config).unwrap();
     let app = routes::router(state.clone());
     tokio::spawn(async move {
@@ -113,6 +358,39 @@ async fn post_count(pool: &SqlitePool, feed_id: i64) -> i64 {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn reader_fallback_url_is_not_executable_javascript() {
+    let (base, state) = spawn_app().await;
+    let feed_id = add_feed(&state.pool, "https://example.com/feed.xml", "active").await;
+    let attack = "https://example.com/';globalThis.auditExecuted=true;//";
+    let post_id = sqlx::query(
+        "INSERT INTO posts (feed_id, guid, url, title, content_html, summary, published_at, thumb_url)
+         VALUES (?, 'g', 'https://example.com/post', 'title', '<p>body</p>', '', '2025-01-01', ?)",
+    )
+    .bind(feed_id)
+    .bind(attack)
+    .execute(&state.pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let html = Client::new()
+        .get(format!("{base}/read/{post_id}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        html.contains(
+            "data-fallback=\"https://example.com/&#39;;globalThis.auditExecuted=true;//\""
+        )
+    );
+    assert!(html.contains("onerror=\"this.onerror=null;this.src=this.dataset.fallback\""));
+    assert!(!html.contains("onerror=\"this.onerror=null;this.src='https://example.com/"));
 }
 
 // ---------- M2: fetch worker ----------
@@ -164,6 +442,46 @@ async fn ingest_dedups_and_sanitizes() {
             .unwrap();
     assert!(summary.chars().count() <= 300);
     assert!(summary.contains("short summary"));
+}
+
+#[tokio::test]
+async fn ingest_handles_duplicates_in_one_response_without_partial_import() {
+    let state = test_state().await;
+    let feed_id = add_feed(&state.pool, "https://example.com/feed.xml", "active").await;
+    let xml = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Duplicates</title>
+      <item><guid>same-guid</guid><title>First</title><link>https://example.com/same</link><description><![CDATA[<p>Body</p>]]></description><pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate></item>
+      <item><guid>same-guid</guid><title>First</title><link>https://example.com/same</link><description><![CDATA[<p>Body</p>]]></description><pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate></item>
+      <item><guid>different-guid</guid><title>First</title><link>https://example.com/same</link><description><![CDATA[<p>Body</p>]]></description><pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate></item>
+      <item><guid>valid</guid><title>Valid</title><link>https://example.com/valid</link><description><![CDATA[<p>Next</p>]]></description><pubDate>Thu, 02 Jan 2025 10:00:00 GMT</pubDate></item>
+    </channel></rss>"#;
+    let feed = crate::worker::discover::parse_feed(xml.as_bytes()).unwrap();
+
+    assert_eq!(
+        fetch::ingest(&state.pool, feed_id, &feed, "https://example.com")
+            .await
+            .unwrap(),
+        2
+    );
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT guid, content_html FROM posts WHERE feed_id = ? ORDER BY guid")
+            .bind(feed_id)
+            .fetch_all(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("same-guid".into(), "<p>Body</p>".into()),
+            ("valid".into(), "<p>Next</p>".into())
+        ]
+    );
+    assert_eq!(
+        fetch::ingest(&state.pool, feed_id, &feed, "https://example.com")
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(post_count(&state.pool, feed_id).await, 2);
 }
 
 #[tokio::test]
@@ -291,6 +609,46 @@ async fn ingest_resolves_relative_links() {
         .await
         .unwrap();
     assert_eq!(url, "https://pjonori.blog/posts/hello");
+}
+
+#[tokio::test]
+async fn body_url_repair_handles_all_rows_in_bounded_batches_and_resanitizes() {
+    let state = test_state().await;
+    let feed_id = add_feed(&state.pool, "https://example.com/feed.xml", "rejected").await;
+    let old_html = r##"<p><a href="/root">root</a><a href="relative">relative</a>
+      <a href="//cdn.example/image">protocol</a><a href="https://absolute.example/a">absolute</a>
+      <a href="#part">fragment</a><a href="javascript:alert(1)">unsafe</a>
+      <img src="/image.jpg"></p><script>alert(1)</script>"##;
+    for i in 0..501 {
+        sqlx::query("INSERT INTO posts (feed_id, guid, url, title, content_html, published_at) VALUES (?, ?, 'https://example.com/articles/post', 'old', ?, '2025-01-01')")
+            .bind(feed_id)
+            .bind(format!("old-{i}"))
+            .bind(old_html)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(fetch::repair_body_urls(&state.pool).await.unwrap(), 501);
+    let html: String =
+        sqlx::query_scalar("SELECT content_html FROM posts WHERE feed_id = ? LIMIT 1")
+            .bind(feed_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    for url in [
+        "https://example.com/root",
+        "https://example.com/articles/relative",
+        "https://cdn.example/image",
+        "https://absolute.example/a",
+        "https://example.com/articles/post#part",
+        "https://example.com/image.jpg",
+    ] {
+        assert!(html.contains(url), "missing resolved URL {url}: {html}");
+    }
+    assert!(!html.contains("javascript:"));
+    assert!(!html.contains("<script"));
+    assert_eq!(fetch::repair_body_urls(&state.pool).await.unwrap(), 0);
 }
 
 #[tokio::test]
@@ -599,6 +957,13 @@ async fn timeline_validates_and_filters() {
             .unwrap();
         assert_eq!(response.status(), 400, "{bad} should be rejected");
     }
+    let max = vec![feed_a.to_string(); 50].join(",");
+    let response = client
+        .get(format!("{base}/api/timeline?feeds={max}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
     let many = vec!["1"; 51].join(",");
     let response = client
         .get(format!("{base}/api/timeline?feeds={many}"))
@@ -959,30 +1324,65 @@ async fn submit_blocks_redirect_to_private() {
 }
 
 #[test]
-fn admin_key_requires_six_mixed_chars() {
+fn admin_key_requires_twelve_printable_ascii_chars() {
     use crate::config::valid_admin_key;
-    assert!(valid_admin_key("ab12cd"));
-    assert!(valid_admin_key("A1b2C3"));
-    assert!(!valid_admin_key("abcdef"));
-    assert!(!valid_admin_key("123456"));
-    assert!(!valid_admin_key("abc12"));
-    assert!(!valid_admin_key("abc1234"));
-    assert!(!valid_admin_key("abc-12"));
+    assert!(valid_admin_key("long-secure-key"));
+    assert!(valid_admin_key("spaces allowed"));
+    assert!(!valid_admin_key("short-key"));
+    assert!(!valid_admin_key("contains\nnewline"));
 }
 
 #[tokio::test]
 async fn admin_requires_basic_auth() {
-    let (base, _state) = spawn_app_with_key(Some("ab12cd")).await;
+    let (base, _state) = spawn_app_with_key(Some("long-secure-key")).await;
     let client = Client::new();
     let denied = client.get(format!("{base}/admin")).send().await.unwrap();
     assert_eq!(denied.status(), 401);
     let ok = client
         .get(format!("{base}/admin"))
-        .basic_auth("admin", Some("ab12cd"))
+        .basic_auth("admin", Some("long-secure-key"))
         .send()
         .await
         .unwrap();
     assert_eq!(ok.status(), 200);
+}
+
+#[tokio::test]
+async fn admin_lockout_blocks_correct_password_until_window_expires() {
+    let (base, state) = spawn_app_with_key(Some("long-secure-key")).await;
+    let client = Client::new();
+    for _ in 0..10 {
+        let response = client
+            .get(format!("{base}/admin"))
+            .basic_auth("admin", Some("wrong-password"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 401);
+    }
+    let blocked = client
+        .get(format!("{base}/admin"))
+        .basic_auth("admin", Some("long-secure-key"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), 429);
+
+    // Exercise expiry without sleeping through the five-minute production window.
+    let ip = "127.0.0.1".parse().unwrap();
+    let expired = std::time::Instant::now() - std::time::Duration::from_secs(301);
+    state
+        .admin_attempts
+        .lock()
+        .unwrap()
+        .insert(ip, vec![expired; 10]);
+    let allowed = client
+        .get(format!("{base}/admin"))
+        .basic_auth("admin", Some("long-secure-key"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), 200);
 }
 
 #[tokio::test]
@@ -997,15 +1397,60 @@ async fn admin_is_disabled_without_key() {
 }
 
 #[tokio::test]
+async fn read_only_mode_blocks_mutations_before_discovery_or_writes() {
+    let (base, state) = spawn_app_with_mode(Some("long-secure-key"), true).await;
+    let client = Client::new();
+    let form = "url=http%3A%2F%2F127.0.0.1%3A1%2Ffeed&category=tech";
+    let submit = client
+        .post(format!("{base}/submit"))
+        .header(ORIGIN, &base)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(submit.status(), 403);
+    let get = client.get(format!("{base}/submit")).send().await.unwrap();
+    let html = get.text().await.unwrap();
+    assert!(html.contains("read-only instance"));
+    assert!(!html.contains("action=\"/submit\""));
+
+    let create = client
+        .post(format!("{base}/admin/feeds"))
+        .basic_auth("admin", Some("long-secure-key"))
+        .header(ORIGIN, &base)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create.status(), 403);
+    let feed_id = add_feed(&state.pool, "https://example.com/read-only", "active").await;
+    let delete = client
+        .post(format!("{base}/admin/feeds/{feed_id}/delete"))
+        .basic_auth("admin", Some("long-secure-key"))
+        .header(ORIGIN, &base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), 403);
+    let feeds: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feeds")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(feeds, 1);
+}
+
+#[tokio::test]
 async fn admin_delete_removes_feed_and_posts() {
-    let (base, state) = spawn_app_with_key(Some("ab12cd")).await;
+    let (base, state) = spawn_app_with_key(Some("long-secure-key")).await;
     let id = add_feed(&state.pool, "https://example.com/feed", "active").await;
     add_post(&state.pool, id, "guid", "A post", "2025-01-01 00:00:00").await;
     let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let response = client
         .post(format!("{base}/admin/feeds/{id}/delete"))
         .header(ORIGIN, &base)
-        .basic_auth("admin", Some("ab12cd"))
+        .basic_auth("admin", Some("long-secure-key"))
         .send()
         .await
         .unwrap();
@@ -1256,6 +1701,14 @@ async fn directory_card_renders_channel_avatar() {
         .execute(&state.pool)
         .await
         .unwrap();
+    add_post(
+        &state.pool,
+        id,
+        "latest",
+        "Latest post",
+        &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    )
+    .await;
     let html = Client::new()
         .get(format!("{base}/"))
         .send()
@@ -1266,6 +1719,9 @@ async fn directory_card_renders_channel_avatar() {
         .unwrap();
     assert!(html.contains(avatar));
     assert!(html.contains(r#"width="48" height="48""#));
+    assert!(html.contains("1 post"));
+    assert!(html.contains("just now"));
+    assert!(html.contains("feed-card-meta-separator"));
 }
 
 #[tokio::test]

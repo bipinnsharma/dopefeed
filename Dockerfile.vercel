@@ -31,6 +31,7 @@ USER dopefeed
 ENV BIND_ADDR=0.0.0.0:3000 \
     DATABASE_URL=sqlite:///tmp/dopefeed.db?mode=rwc \
     WORKER=0 \
+    READ_ONLY=true \
     RUST_LOG=info
 EXPOSE 3000
 ENTRYPOINT ["docker-entrypoint.sh"]

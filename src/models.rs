@@ -30,11 +30,72 @@ pub struct Feed {
     pub post_count: i64,
     pub has_new_post: i64,
     pub latest_label: Option<String>,
+    pub latest_published_at: Option<String>,
 }
 
 impl Feed {
     pub fn is_new(&self) -> bool {
         self.has_new_post != 0
+    }
+
+    pub fn formatted_post_count(&self) -> String {
+        let digits = self.post_count.to_string();
+        let first_group = digits.len() % 3;
+        let mut formatted = digits[..first_group].to_string();
+        for (index, digit) in digits[first_group..].chars().enumerate() {
+            if index % 3 == 0 {
+                formatted.push(',');
+            }
+            formatted.push(digit);
+        }
+        if first_group == 0 {
+            formatted.remove(0);
+        }
+        format!(
+            "{} {}",
+            formatted,
+            if self.post_count == 1 {
+                "post"
+            } else {
+                "posts"
+            }
+        )
+    }
+
+    pub fn latest_age_label(&self) -> Option<String> {
+        use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+
+        let raw = self.latest_published_at.as_deref()?;
+        let published = DateTime::parse_from_rfc3339(raw)
+            .map(|date| date.with_timezone(&Utc))
+            .or_else(|_| {
+                NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S").map(|date| date.and_utc())
+            })
+            .ok()?;
+        let age = (Utc::now() - published).max(Duration::zero());
+        let minutes = age.num_minutes();
+        if minutes < 1 {
+            Some("just now".into())
+        } else if minutes < 60 {
+            Some(format!(
+                "{minutes} min{} ago",
+                if minutes == 1 { "" } else { "s" }
+            ))
+        } else if age.num_hours() < 24 {
+            let hours = age.num_hours();
+            Some(format!(
+                "{hours} hr{} ago",
+                if hours == 1 { "" } else { "s" }
+            ))
+        } else if age < Duration::days(7) {
+            let days = age.num_days();
+            Some(format!(
+                "{days} day{} ago",
+                if days == 1 { "" } else { "s" }
+            ))
+        } else {
+            self.latest_label.clone()
+        }
     }
 
     /// Templates render these, so Blob-hosted assets get their absolute URL.
@@ -236,7 +297,52 @@ pub struct FeedPage {
 
 #[cfg(test)]
 mod tests {
-    use super::Post;
+    use super::{Feed, Post};
+    use chrono::{Duration, Utc};
+
+    fn feed(count: i64, published_at: Option<String>) -> Feed {
+        Feed {
+            id: 1,
+            site_url: "https://example.com".into(),
+            domain: "example.com".into(),
+            title: "Example".into(),
+            description: None,
+            category: "tech".into(),
+            avatar_url: None,
+            banner_url: None,
+            post_count: count,
+            has_new_post: 0,
+            latest_label: Some("2025-01-01".into()),
+            latest_published_at: published_at,
+        }
+    }
+
+    #[test]
+    fn feed_metadata_formats_count_and_published_age() {
+        assert_eq!(feed(2483, None).formatted_post_count(), "2,483 posts");
+        assert_eq!(feed(1, None).formatted_post_count(), "1 post");
+        assert_eq!(feed(0, None).latest_age_label(), None);
+        assert_eq!(feed(1, Some("not a date".into())).latest_age_label(), None);
+
+        let label_for = |age: Duration| {
+            let stamp = (Utc::now() - age).format("%Y-%m-%d %H:%M:%S").to_string();
+            feed(1, Some(stamp)).latest_age_label().unwrap()
+        };
+        assert_eq!(label_for(Duration::seconds(10)), "just now");
+        assert_eq!(label_for(Duration::minutes(1)), "1 min ago");
+        assert_eq!(label_for(Duration::minutes(4)), "4 mins ago");
+        assert_eq!(label_for(Duration::hours(1)), "1 hr ago");
+        assert_eq!(label_for(Duration::days(2)), "2 days ago");
+        assert_eq!(label_for(Duration::days(7)), "2025-01-01");
+
+        let future = (Utc::now() + Duration::days(1))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        assert_eq!(
+            feed(1, Some(future)).latest_age_label().as_deref(),
+            Some("just now")
+        );
+    }
 
     fn post(guid: &str, thumb: Option<&str>) -> Post {
         Post {

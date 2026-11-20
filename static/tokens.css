@@ -4,6 +4,7 @@
   color-scheme: light;
   --color-surface:#fbf7ee;
   --color-surface-solid:#fcfcfc;
+  --surface-base:#fffaf0;
   --color-surface-subtle:#f4eddf;
   --color-surface-muted:#eee5d4;
   --color-border:#e4d9c6;
@@ -73,6 +74,7 @@
   color-scheme: dark;
   --color-surface:#16130f;
   --color-surface-solid:#171717;
+  --surface-base:#171512;
   --color-surface-subtle:#201b16;
   --color-surface-muted:#2a231c;
   --color-border:#332c24;

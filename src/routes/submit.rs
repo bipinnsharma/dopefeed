@@ -30,6 +30,7 @@ struct SubmitPage {
     url: String,
     title: String,
     categories: Vec<CategoryOption>,
+    read_only: bool,
 }
 
 pub(crate) struct CategoryOption {
@@ -54,13 +55,14 @@ pub struct SubmitForm {
     pub title: Option<String>,
 }
 
-pub async fn form() -> AppResult<Html<String>> {
+pub async fn form(State(state): State<AppState>) -> AppResult<Html<String>> {
     Ok(Html(
         SubmitPage {
             error: None,
             url: String::new(),
             title: String::new(),
             categories: category_options(""),
+            read_only: state.config.read_only,
         }
         .render()?,
     ))
@@ -72,6 +74,11 @@ pub async fn create(
     headers: HeaderMap,
     Form(form): Form<SubmitForm>,
 ) -> AppResult<Response> {
+    if state.config.read_only {
+        return Err(AppError::Forbidden(
+            "Submissions are disabled on this read-only instance.".into(),
+        ));
+    }
     if !origin_allowed(&headers, &state.config.base_url) {
         return Err(AppError::Forbidden(
             "Submit from the site itself, not another origin.".into(),
@@ -123,6 +130,7 @@ fn invalid(form: &SubmitForm, category: &str, title: &str, error: &str) -> Respo
         url: form.url.trim().to_string(),
         title: title.to_string(),
         categories: category_options(category),
+        read_only: false,
     };
     match page.render() {
         Ok(html) => (StatusCode::BAD_REQUEST, Html(html)).into_response(),
@@ -178,6 +186,10 @@ pub async fn insert_resolved(
     category: &str,
     title_override: Option<&str>,
 ) -> anyhow::Result<Option<i64>> {
+    anyhow::ensure!(
+        !state.config.read_only,
+        "mutations are disabled in read-only mode"
+    );
     let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM feeds WHERE url = ?")
         .bind(&resolved.feed_url)
         .fetch_optional(&state.pool)

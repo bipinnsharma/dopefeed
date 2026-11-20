@@ -37,7 +37,8 @@ retrying.
 | `DATABASE_URL` | `sqlite://data/dopefeed.db?mode=rwc` | SQLite URL |
 | `RUST_LOG` | `info` | Tracing filter |
 | `FETCH_CONCURRENCY` | `8` | Parallel feed fetches |
-| `ADMIN_KEY` | unset (admin off) | Six letters/numbers with at least one of each; Basic-auth password for `/admin` |
+| `READ_ONLY` | `false` | Reject submission and admin mutations; enabled in the Vercel image |
+| `ADMIN_KEY` | unset (admin off) | At least 12 printable ASCII characters; Basic-auth password for `/admin` |
 
 ## Routes
 
@@ -82,25 +83,51 @@ script (`cfg!(debug_assertions)` guards the tag in `base.html`).
 ```sh
 cargo test
 cargo clippy --all-targets -- -D warnings
+python3 scripts/topfeed_sync.py --self-check
+sh scripts/tests/test_snapshot_safety.sh
 ```
 
 Fixtures in `fixtures/` cover RSS 2.0, Atom, YouTube and malformed XML;
 integration tests use `wiremock`.
 
+The browser regression uses Playwright Python (test-only; no application Node/npm
+build) and a temporary SQLite database:
+
+```sh
+python3 -m pip install -r scripts/tests/requirements.txt
+python3 -m playwright install chromium
+cargo build --bin dopefeed
+python3 scripts/tests/test_browser_flows.py
+```
+
+`sh scripts/check.sh` runs the full offline gates, including the browser flow.
+The snapshot publisher runs this gate before refreshing or uploading anything.
+Install the Playwright dependency and Chromium above before running snapshots.
+GitHub Actions runs the same checks on pushes and pull requests.
+
 ## Maintenance commands
 
 ```sh
 cargo run -- refresh          # force every active feed due now
+cargo run -- refresh-feed 234 # refresh one feed by ID
 python3 scripts/topfeed_sync.py --apply  # match post lists to topfeed.xyz
 cargo run -- optimize-images  # resize/re-encode cached images once
 cargo run -- verify-assets    # fail if the DB references a missing image
+cargo run -- repair-body-urls # one-time bounded repair of stored article links/images
 ```
+
+Run `repair-body-urls` on the local publishing database (or its backup) after
+deploying this fix and before publishing a new snapshot. It scans all historical
+non-empty bodies in batches of 500, is safe to rerun, and is never run against a
+database automatically during normal startup.
 
 `scripts/topfeed_sync.py` is the reference sync: for every local feed that maps
 to a topfeed.xyz feed, topfeed's entries are the source of truth. Missing posts
 are inserted as link stubs, titles and dates are refreshed, and local-only rows
 are removed. Feed names and URLs are never touched, and a topfeed feed with no
-entries is skipped. Posts are keyed by the exact entry URL, like topfeed: the
+entries or an incomplete/ambiguous reference response is skipped before writes.
+Matching uses exact normalized URLs and only one-to-one exact-host fallback;
+unrelated hosts with the same public-suffix ending are never joined. Posts are keyed by the exact entry URL, like topfeed: the
 `http`/`https`, `#fragment`, tracking-query and trailing-slash variants it lists
 are separate posts. When a feed spells a URL differently (scheme, trailing
 slash, fragment, old permalink), the sync reuses the existing row instead of
@@ -113,6 +140,14 @@ sync, image optimization and asset verification, snapshots the DB with
 `.backup`, uploads `data/dopefeed.db.xz` to the `db-latest` GitHub release, then
 commits and pushes. Vercel builds that push, so no deploy happens unless there is
 something new to publish.
+
+Each upload is named with a timestamp and content hash and is validated before
+`data/snapshot.txt` is atomically updated. Earlier release assets are retained so
+older pointers and image/code sets remain usable.
+
+The snapshot publisher refuses staged or modified work and unrelated untracked
+files before it refreshes anything. Untracked generated files under `static/assets/`
+are retained and published; only `data/snapshot.txt` and `static/assets/` are staged.
 
 To publish twice a day, install the launchd job (`scripts/com.dopefeed.snapshot.plist`
 runs it at 07:00 and 21:00). Replace `__REPO__` and `__HOME__` with absolute paths

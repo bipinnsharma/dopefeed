@@ -44,6 +44,19 @@ pub async fn refresh_all(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn refresh_feed(state: &AppState, feed_id: i64) -> anyhow::Result<()> {
+    let feed = sqlx::query_as::<_, fetch::DueFeed>(
+        "SELECT id, url, site_url, etag, last_modified, fetch_interval_secs, error_count, domain,
+         category, images_fetched_at, avatar_url, favicon_fetched_at
+         FROM feeds WHERE id = ? AND status = 'active'",
+    )
+    .bind(feed_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("active feed {feed_id} not found"))?;
+    fetch::refresh(state, &feed).await
+}
+
 async fn run_tick(state: &AppState) -> anyhow::Result<()> {
     let due = sqlx::query_as::<_, fetch::DueFeed>(
         "SELECT id, url, site_url, etag, last_modified, fetch_interval_secs, error_count, domain,

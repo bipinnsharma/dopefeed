@@ -72,6 +72,11 @@ pub async fn create(
     headers: HeaderMap,
     Form(form): Form<SubmitForm>,
 ) -> AppResult<Response> {
+    if state.config.read_only {
+        return Err(AppError::Forbidden(
+            "Admin changes are disabled on this read-only instance.".into(),
+        ));
+    }
     if !submit::origin_allowed(&headers, &state.config.base_url) {
         return Err(AppError::Forbidden(
             "Submit from the site itself, not another origin.".into(),
@@ -126,6 +131,11 @@ pub async fn delete(
     Path(id): Path<i64>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
+    if state.config.read_only {
+        return Err(AppError::Forbidden(
+            "Admin changes are disabled on this read-only instance.".into(),
+        ));
+    }
     if !submit::origin_allowed(&headers, &state.config.base_url) {
         return Err(AppError::Forbidden(
             "Delete from the site itself, not another origin.".into(),
@@ -204,12 +214,16 @@ pub async fn auth(
     let Some(key) = state.config.admin_key.as_deref() else {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     };
-    if authorized(request.headers(), key) {
-        return next.run(request).await;
-    }
     // Browsers probe without credentials first; only count real key attempts.
-    if request.headers().contains_key(AUTHORIZATION) && over_limit(&state, addr.ip()) {
-        return (StatusCode::TOO_MANY_REQUESTS, "Too many attempts.").into_response();
+    if request.headers().contains_key(AUTHORIZATION) {
+        let now = Instant::now();
+        if locked_out(&state, addr.ip(), now) {
+            return (StatusCode::TOO_MANY_REQUESTS, "Too many attempts.").into_response();
+        }
+        if authorized(request.headers(), key) {
+            return next.run(request).await;
+        }
+        record_failure(&state, addr.ip(), now);
     }
     (
         StatusCode::UNAUTHORIZED,
@@ -251,18 +265,19 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
-fn over_limit(state: &AppState, ip: IpAddr) -> bool {
+fn locked_out(state: &AppState, ip: IpAddr, now: Instant) -> bool {
     let Ok(mut attempts) = state.admin_attempts.lock() else {
         return true;
     };
-    let now = Instant::now();
     let entries = attempts.entry(ip).or_default();
     entries.retain(|at| now.duration_since(*at) < FAILURE_WINDOW);
-    if entries.len() >= MAX_FAILURES {
-        return true;
+    entries.len() >= MAX_FAILURES
+}
+
+fn record_failure(state: &AppState, ip: IpAddr, now: Instant) {
+    if let Ok(mut attempts) = state.admin_attempts.lock() {
+        attempts.entry(ip).or_default().push(now);
     }
-    entries.push(now);
-    false
 }
 
 #[cfg(test)]

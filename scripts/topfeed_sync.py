@@ -94,7 +94,7 @@ def all_feeds():
 
 
 def entries(slug):
-    items, page = [], 1
+    items, page, page_size, total = [], 1, None, None
     while True:
         try:
             data = get(f"{API}/{urllib.parse.quote(slug)}?page={page}&pageSize=100")
@@ -102,9 +102,26 @@ def entries(slug):
             if error.code == 404:
                 return None  # topfeed lists it, but the entries endpoint is gone
             raise
-        block = data["entries"]
-        items += block["items"]
-        if page * block["pageSize"] >= block["total"] or not block["items"]:
+        block = data.get("entries", {})
+        current_size, current_total, current_items = (
+            block.get("pageSize"), block.get("total"), block.get("items")
+        )
+        if (not isinstance(current_size, int) or current_size <= 0
+                or not isinstance(current_total, int) or current_total < 0
+                or not isinstance(current_items, list)):
+            print(f"  skipping {slug}: invalid entries pagination metadata", file=sys.stderr)
+            return None
+        if page_size is None:
+            page_size, total = current_size, current_total
+        if current_size != page_size or current_total != total or len(current_items) > page_size:
+            print(f"  skipping {slug}: inconsistent entries pagination metadata", file=sys.stderr)
+            return None
+        expected = min(page_size, total - len(items))
+        if len(current_items) != expected:
+            print(f"  skipping {slug}: incomplete entries page {page} ({len(current_items)}/{expected})", file=sys.stderr)
+            return None
+        items.extend(current_items)
+        if len(items) == total:
             return items
         page += 1
 
@@ -162,15 +179,6 @@ def url_key(url):
     return (host, "/".join(segments) + ("?" + query if query else ""))
 
 
-def site(host):
-    parts = host.split(".")
-    return ".".join(parts[-2:]) if len(parts) >= 2 else host
-
-
-def title_key(title):
-    return re.sub(r"[\W_]+", "", (title or "").lower().replace("new post", ""))
-
-
 def sqlite_time(ms):
     return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -195,24 +203,16 @@ def map_feeds(feeds, rows):
         key = url_key(row["url"])
         options = [feed for feed in by_key.get(key, []) if feed["slug"] not in used]
         if not options:
-            options = [
-                feed
-                for feed in feeds
-                if feed["slug"] not in used and url_key(feed["url"])[1] == key[1] and key[1]
-                and site(url_key(feed["url"])[0]) == site(key[0])
-            ]
-        if not options:
             for host in local_hosts_for(row):
                 candidates = [feed for feed in by_host.get(host, []) if feed["slug"] not in used]
-                # A host shared by two local feeds (every.to) is ambiguous.
-                if len(local_hosts.get(host, [])) == 1 and candidates:
+                # Only a one-to-one exact host match is safe as a fallback.
+                if len(local_hosts.get(host, [])) == 1 and len(candidates) == 1:
                     options = candidates
                     break
+        if len(options) > 1:
+            print(f"  skipping local feed {row['id']}: ambiguous reference match", file=sys.stderr)
+            continue
         if options:
-            options = [feed for feed in options if feed["totalEntriesCount"] > 0] or options
-            # Prefer the record whose title matches ours, then the largest.
-            options.sort(key=lambda feed: (title_key(feed["title"]) != title_key(row["title"]),
-                                           -feed["totalEntriesCount"]))
             feed = options[0]
             if feed["totalEntriesCount"] > 0:
                 used.add(feed["slug"])
@@ -243,6 +243,9 @@ def sync_feed(db, row, feed, apply):
     remote = entries(feed["slug"])
     if remote is None:
         print(f"  skipping {feed['slug']}: entries endpoint returned 404", file=sys.stderr)
+        return None
+    if not remote:
+        print(f"  skipping {feed['slug']}: reference has no entries", file=sys.stderr)
         return None
     keep, claimed, inserted, updated = set(), set(), 0, 0
 
@@ -323,6 +326,7 @@ def sync_feed(db, row, feed, apply):
 
 def self_check():
     """The mapping decides what gets deleted, so pin the URL rules."""
+    global entries
     assert url_key("https://www.example.com/feed.xml") == url_key("http://example.com/rss")
     assert url_key("https://sive.rs/feed.xml") == url_key("https://sive.rs/feed")
     assert url_key("https://blog.samaltman.com/posts.atom") == ("blog.samaltman.com", "")
@@ -338,6 +342,28 @@ def self_check():
     assert url_key("https://shud.in/thoughts/a#atom") == ("shud.in", "thoughts/a")
     assert url_key("https://example.com/?p=1") != url_key("https://example.com/?p=2")
     assert url_key("https://example.com/post?utm_source=rss") == ("example.com", "post")
+    assert not map_feeds(
+        [{"slug": "b", "title": "B", "url": "https://b.co.uk/feed", "websiteUrl": "https://b.co.uk", "totalEntriesCount": 1}],
+        [{"id": 1, "title": "A", "domain": "a.co.uk", "url": "https://a.co.uk/feed", "site_url": "https://a.co.uk"}],
+    ), "unrelated .co.uk hosts must not map"
+    ambiguous = [
+        {"slug": slug, "title": slug, "url": f"https://api.example/{slug}", "websiteUrl": "https://example.com", "totalEntriesCount": 1}
+        for slug in ("one", "two")
+    ]
+    assert not map_feeds(ambiguous, [{"id": 1, "title": "Local", "domain": "example.com", "url": "https://example.com/feed", "site_url": "https://example.com"}])
+
+    global get
+    saved_get = get
+    pages = iter([
+        {"entries": {"pageSize": 2, "total": 3, "items": [{"url": "/1"}, {"url": "/2"}]}},
+        {"entries": {"pageSize": 2, "total": 3, "items": []}},
+    ])
+    get = lambda _url: next(pages)
+    try:
+        assert entries("partial") is None, "partial reference must be rejected"
+    finally:
+        get = saved_get
+
     feed = {"url": "https://pjonori.blog/rss.xml", "websiteUrl": "https://pjonori.blog"}
     assert entry_url({"url": "/posts/x"}, feed) == "https://pjonori.blog/posts/x"
     assert entry_url({"url": "//cdn.example/x"}, feed) == "https://cdn.example/x"
@@ -347,7 +373,6 @@ def self_check():
     # second entry for the same article must add a row, not delete content.
     import sqlite3 as sqlite
 
-    global entries
     saved_entries = entries
     test = sqlite.connect(":memory:")
     test.executescript(
@@ -386,6 +411,14 @@ def self_check():
     assert (kept, inserted, deleted) == (2, 1, 2), (kept, inserted, deleted)
     assert test.execute("SELECT count(*) FROM posts").fetchone()[0] == 2
     assert test.execute("SELECT content_html FROM posts WHERE id = 2").fetchone()[0] == "<p>body</p>"
+
+    entries = lambda _slug: []
+    try:
+        before = test.execute("SELECT count(*) FROM posts").fetchone()[0]
+        assert sync_feed(test, row, {"slug": "empty"}, True) is None
+        assert test.execute("SELECT count(*) FROM posts").fetchone()[0] == before
+    finally:
+        entries = saved_entries
 
     import shutil
     import tempfile
