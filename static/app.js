@@ -233,6 +233,21 @@
     if (!wasOn) showToast((button.dataset.feedTitle || "Feed") + " is added to your feed.");
   });
   document.addEventListener("htmx:afterSwap", paintState);
+  document.addEventListener("htmx:afterSwap", function (event) {
+    if (reduceMotion) return;
+    var trigger = event.detail && event.detail.elt;
+    var categoryChange = trigger && trigger.closest(".chips");
+    var loadMore = trigger && trigger.closest(".load-more");
+    if (!categoryChange && !loadMore) return;
+
+    var grids = document.querySelectorAll("#feed-grid .feed-grid");
+    var grid = grids[loadMore ? grids.length - 1 : 0];
+    if (!grid) return;
+    grid.querySelectorAll(".feed-card").forEach(function (card, index) {
+      card.style.setProperty("--feed-enter-delay", Math.min(index * 30, 300) + "ms");
+    });
+    grid.classList.add("is-entering");
+  });
   window.addEventListener("pageshow", paintState);
   window.addEventListener("storage", function (event) {
     if (event.key === SUBS || event.key === READ) paintState();

@@ -321,6 +321,17 @@ img { max-width: 100%; }
   gap: var(--space-12);
 }
 .feed-grid + .feed-grid { margin-top: var(--space-12); }
+.feed-grid.is-entering .feed-card {
+  animation: feed-card-enter var(--duration-feed-enter) var(--ease-out-spring) both;
+  animation-delay: var(--feed-enter-delay, 0ms);
+}
+@keyframes feed-card-enter {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-grid.is-entering .feed-card { animation: none; }
+}
 .feed-card {
   display: flex;
   flex-direction: column;
