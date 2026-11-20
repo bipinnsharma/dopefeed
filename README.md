@@ -159,6 +159,11 @@ sed "s#__REPO__#$PWD#g; s#__HOME__#$HOME#g" scripts/com.dopefeed.snapshot.plist 
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dopefeed.snapshot.plist
 ```
 
+For Vercel, `.github/workflows/snapshot.yml` runs the same publisher at 07:00 and
+19:00 UTC. It restores the latest release database, refreshes it, then publishes
+the new snapshot pointer; the resulting push triggers Vercel's production build.
+It can also be started manually from the GitHub Actions tab.
+
 macOS will not let launchd read a checkout under `~/Documents`; keep the repo
 somewhere like `~/dopefeed`. Output goes to `~/Library/Logs/dopefeed-snapshot.log`.
 
